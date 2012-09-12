@@ -211,6 +211,7 @@ module Pingpong
 
                 # ball is coming towards us
                 iterator = 0
+                distance_to_player = 0
 
                 while iterator < @max_iterations
 
@@ -229,17 +230,24 @@ module Pingpong
                     # no collision, calculate direct line
                     x1 = @config.paddleWidth + @config.ballRadius
                     y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
+                    distance_to_player += Math.hypot( x1-x2,y1-y2 )
                     # calculate current angle
                     @last_enter_angle = @math.calculate_line_angle( x1, y1, x2, y2 )
-                    if @last_enter_angle <= 90
-                      @hit_offset = -(@hit_offset_max * @hit_offset_power)
+                    if y1 < @config.paddleHeight or y1 > (@config.arenaHeight - @config.paddleHeight)
+                      @hit_offset = 0
                     else
-                      @hit_offset = (@hit_offset_max * @hit_offset_power)
+                      if @last_enter_angle <= 90
+                        @hit_offset = -(@hit_offset_max * @hit_offset_power)
+                      else
+                        @hit_offset = (@hit_offset_max * @hit_offset_power)
+                      end
                     end
                     @ownPaddle.set_target(y1 + @hit_offset)
                     @log.write "Info: Own enter angle = #{@last_enter_angle}" if $DEBUG
                     break
                   end
+
+                  distance_to_player += Math.hypot( x1-x2,y1-y2 )
 
                   # Set new start position to the collision point (using the same velocity)
                   x2 = x1
@@ -257,64 +265,80 @@ module Pingpong
                 # ball is going to opposite side
                 # we can still calculate where it would hit and how it would bounce back to us
                 iterator = 0
+                distance_to_player = 0
+                distance_to_enemy = 0
 
-                #if @ball.x > @config.arenaWidth/6
+                while iterator < @max_iterations*2
 
-                  while iterator < @max_iterations*2
+                  deltaX = x2-x3
+                  deltaY = y2-y3
 
-                    deltaX = x2-x3
-                    deltaY = y2-y3
+                  if deltaY < 0
+                    y1 = @config.ballRadius
+                  else
+                    y1 = @config.arenaHeight - @config.ballRadius - 1
+                  end
 
-                    if deltaY < 0
-                      y1 = @config.ballRadius
-                    else
-                      y1 = @config.arenaHeight - @config.ballRadius - 1
-                    end
+                  x1 = @math.calculate_collision(y1, x2, y2, x3, y3)
 
-                    x1 = @math.calculate_collision(y1, x2, y2, x3, y3)
+                  if x1 < @config.paddleWidth + @config.ballRadius
+                    # no collision, calculate direct line
+                    x1 = @config.paddleWidth + @config.ballRadius
+                    y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
+                    distance_to_player += Math.hypot( x1-x2,y1-y2 )
+                    @ownPaddle.set_target(y1)
+                    # calculate current angle
+                    @last_enter_angle = @math.calculate_line_angle( x1, y1, x2, y2 )
+                    @log.write "Info: Own enter angle = #{@last_enter_angle}" if $DEBUG
+                    #@log.debug "Ball is going to hit at #{x1}, #{y1} with distance of #{distance_to_player} pixels."
+                    break
+                  end
 
-                    if x1 < @config.paddleWidth + @config.ballRadius
-                      # no collision, calculate direct line
-                      x1 = @config.paddleWidth + @config.ballRadius
-                      y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
-                      @ownPaddle.set_target(y1)
-                      # calculate current angle
-                      @last_enter_angle = @math.calculate_line_angle( x1, y1, x2, y2 )
-                      @log.write "Info: Own enter angle = #{@last_enter_angle}" if $DEBUG
-                      break
-                    end
-
-                    if x1 > @config.arenaWidth - @config.paddleWidth - @config.ballRadius
-                      # no collision, calculate direct line
-                      x1 = @config.arenaWidth - @config.paddleWidth - @config.ballRadius
-                      y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
-                      # calculate current angle
-                      @last_enter_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
-                      @log.write "Info: Enemy enter angle = #{@last_enter_angle}" if $DEBUG
-                      # bounce ball back and continue
-                      x2 = x1
-                      y2 = y1
-                      x3 = x2 + deltaX
-                      y3 = y2 - deltaY
-                      deltaX = x2-x3
-                      deltaY = y2-y3
-                      # increment iteration count
-                      iterator+=1
-                      next
-                    end
-
-                    # Set new start position to the collision point (using the same velocity)
+                  if x1 > @config.arenaWidth - @config.paddleWidth - @config.ballRadius
+                    # no collision, calculate direct line
+                    x1 = @config.arenaWidth - @config.paddleWidth - @config.ballRadius
+                    y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
+                    distance_to_player += Math.hypot( x1-x2,y1-y2 )
+                    distance_to_enemy += Math.hypot( x1-x2,y1-y2 )
+                    @enemyPaddle.set_target(y1)
+                    # calculate current angle
+                    @last_enter_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
+                    @log.write "Info: Enemy enter angle = #{@last_enter_angle}" if $DEBUG
+                    distance_to_paddle = (y1 - @enemyPaddle.y).abs
+                    #
+                    # calculate how many seconds it takes the ball to hit the enemy side
+                    # calculate where enemy is going to be at that time
+                    # get the difference and paddle location
+                    #
+                    #delta = (distance_to_enemy - distance_to_paddle)
+                    #@log.debug "BallHit @ #{y1} (dist=#{distance_to_enemy}px), p-dist=#{distance_to_paddle} #{delta})"
+                    # bounce ball back and continue
                     x2 = x1
                     y2 = y1
-                    x3 = x2 - deltaX
-                    y3 = y2 + deltaY
-
+                    x3 = x2 + deltaX
+                    y3 = y2 - deltaY
+                    deltaX = x2-x3
+                    deltaY = y2-y3
                     # increment iteration count
                     iterator+=1
+                    next
+                  end
 
-                  end # /while   
-                                 
-                #end
+                  distance_to_player += Math.hypot( x1-x2,y1-y2 )
+                  if ( deltaX > 0 )
+                    distance_to_enemy += Math.hypot( x1-x2,y1-y2 )
+                  end
+
+                  # Set new start position to the collision point (using the same velocity)
+                  x2 = x1
+                  y2 = y1
+                  x3 = x2 - deltaX
+                  y3 = y2 + deltaY
+
+                  # increment iteration count
+                  iterator+=1
+
+                end # /while   
 
                 if iterator == @max_iterations*2
                   # ok, too much work, we can just go to middle
@@ -334,20 +358,20 @@ module Pingpong
               @updatedLastTimestamp = @local_time
 
               # send update to server about the direction we should be going
-              if ( @ownPaddle.target_y < @config.paddleHeight/2 )
-                @ownPaddle.set_target( @config.paddleHeight / 2 )
+              if ( @ownPaddle.target_y < @config.paddleHeight / 2 + 2 )
+                @ownPaddle.set_target( @config.paddleHeight / 2 + 2 )
               end if
 
-              if ( @ownPaddle.target_y > @config.arenaHeight - @config.paddleHeight/2 - 1 )
-                @ownPaddle.set_target( @config.arenaHeight - @config.paddleHeight/2 - 1 )
+              if ( @ownPaddle.target_y > @config.arenaHeight - @config.paddleHeight/2 - 2 )
+                @ownPaddle.set_target( @config.arenaHeight - @config.paddleHeight/2 - 2 )
               end if
 
               delta = (@ownPaddle.y + (@config.paddleHeight / 2) - (@ownPaddle.target_y - @config.ballRadius/4)).abs
 
               speed = 1.0
 
-              if ( delta < 10 )
-                speed = delta/10
+              if ( delta < 30 )
+                speed = delta/30
               end
 
               #if ( delta < 10 )
@@ -358,17 +382,17 @@ module Pingpong
               #    tcp.puts movement_message(-1.0)
               #else
                 if (@ownPaddle.y + (@config.paddleHeight / 2)) < (@ownPaddle.target_y - @config.ballRadius/4)
-                  if @last_sent_changedir != speed
+                  #if @last_sent_changedir != speed
                     @log.write "> changeDir(#{speed})" if $DEBUG
-                    @last_sent_changedir = speed
+                    #@last_sent_changedir = speed
                     tcp.puts movement_message(speed)
-                  end
+                  #end
                 else
-                  if @last_sent_changedir != -speed
+                  #if @last_sent_changedir != -speed
                     @log.write "> changeDir(#{-speed})" if $DEBUG
-                    @last_sent_changedir = -speed
+                    #@last_sent_changedir = -speed
                     tcp.puts movement_message(-speed)
-                  end
+                  #end
                 end
               #end             
 
