@@ -13,32 +13,30 @@ module Pingpong
 
     def initialize(player_name, server_host, server_port, debug_flags = nil)
 
+      @log = Helpers::Log.new
+
       # banner
-      log_message ""
-      log_message " _______ __                      __       "
-      log_message "|    ___|__|.-----.----.-----.--|  |.----."
-      log_message "|    ___|  ||     |  __|  _  |  _  ||   _|"
-      log_message "|___|   |__||__|__|____|_____|_____||__|  "
-      log_message ""
-      log_message "   H e l l o W o r l d O p e n   B o t"
-      log_message "   Coded by Fincodr aka Mika Luoma-aho"
-      log_message "   Send job offers to <fincodr@mxl.fi>"
-      log_message ""
+      @log.write ""
+      @log.write " _______ __                      __       "
+      @log.write "|    ___|__|.-----.----.-----.--|  |.----."
+      @log.write "|    ___|  ||     |  __|  _  |  _  ||   _|"
+      @log.write "|___|   |__||__|__|____|_____|_____||__|  "
+      @log.write ""
+      @log.write "   H e l l o W o r l d O p e n   B o t"
+      @log.write "   Coded by Fincodr aka Mika Luoma-aho"
+      @log.write "   Send job offers to <fincodr@mxl.fi>"
+      @log.write ""
 
       # log initialize parameters
-      log_message "initialize(#{player_name}, #{server_host}, #{server_port})"
+      @log.write "initialize(#{player_name}, #{server_host}, #{server_port})"
       
-      ###############################################
-      #
       # Initialize global classes
-      #                                    
-      @ownPaddle = Helpers::Paddle.new()
-      @enemyPaddle = Helpers::Paddle.new()
-      @ball = Helpers::Ball.new()
+      @ownPaddle = Helpers::Paddle.new
+      @enemyPaddle = Helpers::Paddle.new
+      @ball = Helpers::Ball.new
+      @math = Helpers::Math.new
 
-      ###############################################
       # Set starting values
-      #
       @server_time = 0
       @server_time_elapsed = 0
       @server_time_delta = 0
@@ -46,61 +44,30 @@ module Pingpong
       @local_time_elapsed = 0
       @local_time_delta = 0
 
-      ###############################################
       # last updated timestamps
-      #
       @updatedLastTimestamp = 0
       @updatedDeltaTime = 0
       @updateRate = 100 # limit send rate to 10 msg/s
 
-      ###############################################
       # AI settings
-      #
       @maxIterations = 10
 
-      ###############################################
-      #
       # default configuration
       # will be updated from the gameIsOn server message
-      #
       @config = Helpers::Configuration.new()
       @config.set_arena( 640, 480 )
       @config.set_paddle( 10, 50 )
       @config.set_ball( 5 )
 
-      ###############################################
-      #
       # open socket to server
-      #
       tcp = TCPSocket.open(server_host, server_port)
       play(player_name, tcp)
     end
 
     private
 
-    def calculate_collision(y1, x2, y2, x3, y3)
-      x1 = x3 - ((x2 - x3) / (y2 - y3)) * (y3 - y1)
-      return x1
-    end
-
-    def on_the_same_line(x1, y1, x2, y2, x3, y3)
-      begin
-        return true if y1 == y2 && y2 == y3
-        return true if x1 == x2 && x2 == x3
-        amount = ((x3-x1) - ((x2 - x3) / (y2 - y3)) * (y3 - y1)).abs
-        if amount < 2.0
-          return true
-        else
-          return false
-        end
-      rescue
-        # division by zero
-        return false
-      end
-    end
-
     def play(player_name, tcp)
-      log_message "> join(#{player_name})"
+      @log.write "> join(#{player_name})"
       tcp.puts join_message(player_name)
       react_to_messages_from_server tcp
     end
@@ -111,17 +78,17 @@ module Pingpong
         case message['msgType']
 
           when 'joined'
-            log_message "< joined: #{json}"
+            @log.write "< joined: #{json}"
             Launchy.open(message['data'])
 
           when 'gameStarted'
-            log_message "< gameStarted: #{json}"
+            @log.write "< gameStarted: #{json}"
 
           when 'gameIsOn'
             # update local time from clock
             @local_time = get_localtimestamp
 
-            log_message "< gameIsOn: #{json}"
+            @log.write "< gameIsOn: #{json}"
             msg = message['data']
 
             if @server_time != 0
@@ -131,47 +98,39 @@ module Pingpong
 
             @server_time = Integer(msg['time'])
 
-            ###############################################
-            #
             # update ball information from json packet
-            #
             begin
               msg_ball = msg['ball']
               @ball.set_position( Float(msg_ball['pos']['x']), Float(msg_ball['pos']['y']) )
             rescue
-              log_message "Warning: Ball block missing from json packet"
+              @log.write "Warning: Ball block missing from json packet"
               # we don't know where the ball is, stop simulating
             end
 
-            ###############################################
-            #
             # update configuration information from json packet
-            #
             begin
               msg_conf = msg['conf']
               @config.set_arena( msg_conf['maxWidth'], msg_conf['maxHeight'] )
               @config.set_paddle( msg_conf['paddleWidth'], msg_conf['paddleHeight'] )
               @config.set_ball( msg_conf['ballRadius'] )
             rescue
-              log_message "Warning: Configuration block missing from json packet"
+              @log.write "Warning: Configuration block missing from json packet"
             end
 
-            ###############################################
-            #
             # update player information from json packet
-            #
             begin
               msg_own = msg['left']
               msg_enemy = msg['right']
               @ownPaddle.set_position( 0, Float(msg_own['y']) )
               @enemyPaddle.set_position( @config.arenaWidth, Float(msg_enemy['y']) )
             rescue
-              log_message "Warning: Player block missing from json packet"
+              @log.write "Warning: Player block missing from json packet"
             end
+
 
             ###############################################
             #
-            # Simulation code
+            # Simulation code start
             #
             x3 = @ball.x2
             y3 = @ball.y2
@@ -182,7 +141,7 @@ module Pingpong
             deltaX = x2-x3
 
             # if all points are on the same line, we can calculate ball trajectory
-            if on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+            if @math.on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
 
               if ( deltaX < 0 )
 
@@ -200,12 +159,12 @@ module Pingpong
                     y1 = @config.arenaHeight - @config.ballRadius - 1
                   end
 
-                  x1 = calculate_collision(y1, x2, y2, x3, y3)
+                  x1 = @math.calculate_collision(y1, x2, y2, x3, y3)
 
                   if x1 < @config.paddleWidth + @config.ballRadius
                     # no collision, calculate direct line
                     x1 = @config.paddleWidth + @config.ballRadius
-                    y1 = calculate_collision(x1, y2, x2, y3, x3)
+                    y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
                     @ownPaddle.set_target(y1)
                     break
                   end
@@ -238,12 +197,12 @@ module Pingpong
                     y1 = @config.arenaHeight - @config.ballRadius - 1
                   end
 
-                  x1 = calculate_collision(y1, x2, y2, x3, y3)
+                  x1 = @math.calculate_collision(y1, x2, y2, x3, y3)
 
                   if x1 < @config.paddleWidth + @config.ballRadius
                     # no collision, calculate direct line
                     x1 = @config.paddleWidth + @config.ballRadius
-                    y1 = calculate_collision(x1, y2, x2, y3, x3)
+                    y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
                     @ownPaddle.set_target(y1)
                     break
                   end
@@ -251,7 +210,7 @@ module Pingpong
                   if x1 > @config.arenaWidth - @config.paddleWidth - @config.ballRadius
                     # no collision, calculate direct line
                     x1 = @config.arenaWidth - @config.paddleWidth - @config.ballRadius
-                    y1 = calculate_collision(x1, y2, x2, y3, x3)
+                    y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
                     # bounce ball back and continue
                     x2 = x1
                     y2 = y1
@@ -283,6 +242,10 @@ module Pingpong
               end # /if
 
             end # /if on_the_same_line 
+            #
+            # Simulation code end
+            #
+            ###############################################
 
             if @local_time - @updatedLastTimestamp > @updateRate              
 
@@ -310,21 +273,21 @@ module Pingpong
               end
 
               if (@ownPaddle.y + (@config.paddleHeight / 2)) < @ownPaddle.target_y
-                log_message "> changeDir(#{speed})"
+                @log.write "> changeDir(#{speed})"
                 tcp.puts movement_message(speed)
               else
-                log_message "> changeDir(#{-speed})"
+                @log.write "> changeDir(#{-speed})"
                 tcp.puts movement_message(-speed)
               end
 
             end # /if
 
           when 'gameIsOver'
-            log_message "< gameIsOver: Winner is #{message['data']}"
+            @log.write "< gameIsOver: Winner is #{message['data']}"
 
           else
             # unknown message received
-            log_message "< unknown_message: #{json}"
+            @log.write "< unknown_message: #{json}"
         end
       end
     end
@@ -335,31 +298,6 @@ module Pingpong
 
     def movement_message(delta)
       %Q!{"msgType":"changeDir","data":#{delta}}!
-    end
-
-    ###############################################
-    # Function: log_message
-    #
-    # logs a message to the standard output with
-    # timestamp information.
-    #
-    # returns:
-    # - nothing
-    def log_message(msg)
-      timestamp = DateTime.now.strftime "[%Y%m%d-%H%M%S.%L]"
-      puts "#{timestamp} #{msg}"
-    end
-    
-    ###############################################
-    # Function: predict_ball_position
-    #
-    # predicts ball trajectory from the start position
-    # to either end of the arena
-    # returns:
-    # nil - if no end position can be predicted at this time
-    # Point (class) - x and y position of the predicted location
-    #
-    def predict_ball_position(xPrev, yPrev, x, y)
     end
 
     def get_localtimestamp
