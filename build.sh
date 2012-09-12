@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/bash 
 
 which bundle > /dev/null
 if [ "$?" -ne "0" ]; then

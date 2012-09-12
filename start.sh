@@ -28,7 +28,7 @@ function exit_if_running() {
 
 function start_client() {
   logfile=client.log
-  (ruby lib/pingpong_client.rb $playername $host $port &>$logfile) & echo $! > $pidfile
+  (ruby lib/start.rb $playername $host $port &>$logfile) & echo $! > $pidfile
   echo "Logging into $logfile"
 }
 
