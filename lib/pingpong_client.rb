@@ -11,7 +11,7 @@ module Pingpong
 
   class Client
 
-    def initialize(player_name, server_host, server_port, debug_flags = nil)
+    def initialize(player_name, server_host, server_port)
 
       @log = Helpers::Log.new
 
@@ -36,6 +36,16 @@ module Pingpong
       @ball = Helpers::Ball.new
       @math = Helpers::Math.new
 
+      reset_round
+
+      # open socket to server
+      tcp = TCPSocket.open(server_host, server_port)
+      play(player_name, tcp)
+    end
+
+    private
+
+    def reset_round
       # Set starting values
       @server_time = 0
       @server_time_elapsed = 0
@@ -47,10 +57,19 @@ module Pingpong
       # last updated timestamps
       @updatedLastTimestamp = 0
       @updatedDeltaTime = 0
-      @updateRate = 100 # limit send rate to 10 msg/s
+      @updateRate = 1000/9.5 # limit send rate to ~9.5 msg/s
 
       # AI settings
-      @maxIterations = 10
+      @last_sent_changedir = -99.0
+      @max_iterations = 10
+      @last_enter_angle = 0
+      @last_exit_angle = 0
+      @last_dirX = 0
+      @last_deviation = 0
+      @hit_offset = 0
+      @hit_offset_max = 25
+      @last_velocity = 0
+      @max_velocity = 0
 
       # default configuration
       # will be updated from the gameIsOn server message
@@ -59,12 +78,12 @@ module Pingpong
       @config.set_paddle( 10, 50 )
       @config.set_ball( 5 )
 
-      # open socket to server
-      tcp = TCPSocket.open(server_host, server_port)
-      play(player_name, tcp)
-    end
+      # set class to default values
+      @ball.set_position( 640/2, 480/2 )
+      @ownPaddle.set_y( 480/2 )
+      @enemyPaddle.set_y( 480/2 )
 
-    private
+    end
 
     def play(player_name, tcp)
       @log.write "> join(#{player_name})"
@@ -88,7 +107,11 @@ module Pingpong
             # update local time from clock
             @local_time = get_localtimestamp
 
-            @log.write "< gameIsOn: #{json}"
+            if $DEBUG
+              @log.write "< gameIsOn: #{json}"
+            else
+              @log.write "< gameIsOn: event fired"
+            end
             msg = message['data']
 
             if @server_time != 0
@@ -113,6 +136,11 @@ module Pingpong
               @config.set_arena( msg_conf['maxWidth'], msg_conf['maxHeight'] )
               @config.set_paddle( msg_conf['paddleWidth'], msg_conf['paddleHeight'] )
               @config.set_ball( msg_conf['ballRadius'] )
+              h = msg_conf['paddleHeight'] / 2 - (@config.ballRadius)
+              if ( h < 5 )
+                h = 0
+              end
+              @hit_offset_max = h
             rescue
               @log.write "Warning: Configuration block missing from json packet"
             end
@@ -127,28 +155,64 @@ module Pingpong
               @log.write "Warning: Player block missing from json packet"
             end
 
-
             ###############################################
             #
             # Simulation code start
             #
-            x3 = @ball.x2
-            y3 = @ball.y2
-            x2 = @ball.x
-            y2 = @ball.y
-            x1 = 0.0
-            y1 = 0.0
-            deltaX = x2-x3
-
-            # if all points are on the same line, we can calculate ball trajectory
+            # If all points are on the same line, we can calculate ball trajectory
+            #
             if @math.on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+
+              # set the start position
+              x3 = @ball.x2
+              y3 = @ball.y2
+              x2 = @ball.x
+              y2 = @ball.y
+              @last_velocity = Math.hypot( x2-x3,y2-y3 ) / @server_time_delta
+              if @last_velocity > @max_velocity
+                #@log.debug "Max Velocity now #{@last_velocity}\tElapsed time = #{@server_time_elapsed}"
+                @max_velocity = @last_velocity
+              end
+
+              # scale hit_offset depending on the max velocity
+              # note: starting velocity is usually about 0.250
+              @hit_offset_power = 1.0 - (@max_velocity-0.250)
+              @hit_offset_power = 1.0 if @hit_offset_power > 1.0
+              @hit_offset_power = 0.0 if @hit_offset_power < 0.0
+
+              @log.write "Info: Server time delta = #{@server_time_delta}" if $DEBUG
+              #$stderr.puts "Info: Last velocity = #{@last_velocity}"
+              x1 = 0.0
+              y1 = 0.0
+              deltaX = x2-x3
+              if ( deltaX < 0 )
+                dirX = -1
+              else
+                dirX = 1
+              end
+              if dirX != @last_dirX
+                if dirX > 0
+                  @log.write "Info: Direction changed, now going towards enemy" if $DEBUG
+                  @last_exit_angle = @math.calculate_line_angle( x3, y3, x2, y2 )
+                  @log.write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
+                  # check deviation from normal bounce angle
+                  expected_exit_angle = 180 - @last_enter_angle
+                  @last_deviation = @last_exit_angle - expected_exit_angle
+                  if @last_enter_angle <= 90
+                    @log.write "Info: Deviation from <90 to normal exit angle = #{@last_deviation}" if $DEBUG
+                  else
+                    @log.write "Info: Deviation from >90 to normal exit angle = #{@last_deviation}" if $DEBUG
+                  end
+                end
+                @last_dirX = dirX
+              end
 
               if ( deltaX < 0 )
 
                 # ball is coming towards us
                 iterator = 0
 
-                while iterator < @maxIterations
+                while iterator < @max_iterations
 
                   deltaX = x2-x3
                   deltaY = y2-y3
@@ -165,7 +229,15 @@ module Pingpong
                     # no collision, calculate direct line
                     x1 = @config.paddleWidth + @config.ballRadius
                     y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
-                    @ownPaddle.set_target(y1)
+                    # calculate current angle
+                    @last_enter_angle = @math.calculate_line_angle( x1, y1, x2, y2 )
+                    if @last_enter_angle <= 90
+                      @hit_offset = -(@hit_offset_max * @hit_offset_power)
+                    else
+                      @hit_offset = (@hit_offset_max * @hit_offset_power)
+                    end
+                    @ownPaddle.set_target(y1 + @hit_offset)
+                    @log.write "Info: Own enter angle = #{@last_enter_angle}" if $DEBUG
                     break
                   end
 
@@ -186,55 +258,65 @@ module Pingpong
                 # we can still calculate where it would hit and how it would bounce back to us
                 iterator = 0
 
-                while iterator < @maxIterations*2
+                #if @ball.x > @config.arenaWidth/6
 
-                  deltaX = x2-x3
-                  deltaY = y2-y3
+                  while iterator < @max_iterations*2
 
-                  if deltaY < 0
-                    y1 = @config.ballRadius
-                  else
-                    y1 = @config.arenaHeight - @config.ballRadius - 1
-                  end
-
-                  x1 = @math.calculate_collision(y1, x2, y2, x3, y3)
-
-                  if x1 < @config.paddleWidth + @config.ballRadius
-                    # no collision, calculate direct line
-                    x1 = @config.paddleWidth + @config.ballRadius
-                    y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
-                    @ownPaddle.set_target(y1)
-                    break
-                  end
-
-                  if x1 > @config.arenaWidth - @config.paddleWidth - @config.ballRadius
-                    # no collision, calculate direct line
-                    x1 = @config.arenaWidth - @config.paddleWidth - @config.ballRadius
-                    y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
-                    # bounce ball back and continue
-                    x2 = x1
-                    y2 = y1
-                    x3 = x2 + deltaX
-                    y3 = y2 - deltaY
                     deltaX = x2-x3
                     deltaY = y2-y3
+
+                    if deltaY < 0
+                      y1 = @config.ballRadius
+                    else
+                      y1 = @config.arenaHeight - @config.ballRadius - 1
+                    end
+
+                    x1 = @math.calculate_collision(y1, x2, y2, x3, y3)
+
+                    if x1 < @config.paddleWidth + @config.ballRadius
+                      # no collision, calculate direct line
+                      x1 = @config.paddleWidth + @config.ballRadius
+                      y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
+                      @ownPaddle.set_target(y1)
+                      # calculate current angle
+                      @last_enter_angle = @math.calculate_line_angle( x1, y1, x2, y2 )
+                      @log.write "Info: Own enter angle = #{@last_enter_angle}" if $DEBUG
+                      break
+                    end
+
+                    if x1 > @config.arenaWidth - @config.paddleWidth - @config.ballRadius
+                      # no collision, calculate direct line
+                      x1 = @config.arenaWidth - @config.paddleWidth - @config.ballRadius
+                      y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
+                      # calculate current angle
+                      @last_enter_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
+                      @log.write "Info: Enemy enter angle = #{@last_enter_angle}" if $DEBUG
+                      # bounce ball back and continue
+                      x2 = x1
+                      y2 = y1
+                      x3 = x2 + deltaX
+                      y3 = y2 - deltaY
+                      deltaX = x2-x3
+                      deltaY = y2-y3
+                      # increment iteration count
+                      iterator+=1
+                      next
+                    end
+
+                    # Set new start position to the collision point (using the same velocity)
+                    x2 = x1
+                    y2 = y1
+                    x3 = x2 - deltaX
+                    y3 = y2 + deltaY
+
                     # increment iteration count
                     iterator+=1
-                    next
-                  end
 
-                  # Set new start position to the collision point (using the same velocity)
-                  x2 = x1
-                  y2 = y1
-                  x3 = x2 - deltaX
-                  y3 = y2 + deltaY
+                  end # /while   
+                                 
+                #end
 
-                  # increment iteration count
-                  iterator+=1
-
-                end # /while
-
-                if iterator == @maxIterations*2
+                if iterator == @max_iterations*2
                   # ok, too much work, we can just go to middle
                   @ownPaddle.set_target( @config.arenaHeight / 2 )
                 end
@@ -260,34 +342,46 @@ module Pingpong
                 @ownPaddle.set_target( @config.arenaHeight - @config.paddleHeight/2 - 1 )
               end if
 
-              delta = (@ownPaddle.y + (@config.paddleHeight / 2) - @ownPaddle.target_y).abs
+              delta = (@ownPaddle.y + (@config.paddleHeight / 2) - (@ownPaddle.target_y - @config.ballRadius/4)).abs
 
               speed = 1.0
 
-              if ( delta < 30 )
-                speed = delta/30
-              end
-
               if ( delta < 10 )
-                speed = 0
+                speed = delta/10
               end
 
-              if (@ownPaddle.y + (@config.paddleHeight / 2)) < @ownPaddle.target_y
-                @log.write "> changeDir(#{speed})"
-                tcp.puts movement_message(speed)
-              else
-                @log.write "> changeDir(#{-speed})"
-                tcp.puts movement_message(-speed)
-              end
+              #if ( delta < 10 )
+              #  speed = 0
+              #end
+
+              #if @last_dirX < 0 && @ball.x < @config.paddleWidth + 25
+              #    tcp.puts movement_message(-1.0)
+              #else
+                if (@ownPaddle.y + (@config.paddleHeight / 2)) < (@ownPaddle.target_y - @config.ballRadius/4)
+                  if @last_sent_changedir != speed
+                    @log.write "> changeDir(#{speed})" if $DEBUG
+                    @last_sent_changedir = speed
+                    tcp.puts movement_message(speed)
+                  end
+                else
+                  if @last_sent_changedir != -speed
+                    @log.write "> changeDir(#{-speed})" if $DEBUG
+                    @last_sent_changedir = -speed
+                    tcp.puts movement_message(-speed)
+                  end
+                end
+              #end             
 
             end # /if
 
           when 'gameIsOver'
             @log.write "< gameIsOver: Winner is #{message['data']}"
+            @log.debug "gameIsOver: Winner is #{message['data']}" if $DEBUG
+            reset_round
 
           else
             # unknown message received
-            @log.write "< unknown_message: #{json}"
+            @log.write "< unknown_message: #{json}" if $DEBUG
         end
       end
     end

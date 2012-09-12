@@ -16,6 +16,11 @@ module Helpers
       puts "#{timestamp} #{msg}"
     end
 
+    def debug(msg)
+      timestamp = DateTime.now.strftime "[%Y%m%d-%H%M%S.%L]"
+      $stderr.puts "#{timestamp} #{msg}"
+    end
+
   end
 
   class Configuration
@@ -121,6 +126,28 @@ module Helpers
         # division by zero
         return false
       end
+    end
+
+    def radians_to_degree( radians )
+      return radians * 180 / ::Math::PI
+    end #/ radians_to_degree
+
+    def calculate_line_angle( x1, y1, x2, y2 )
+      angle = radians_to_degree( ::Math.atan((x2-x1)/(y2-y1)) )
+      if x2 > x1
+        if y2 < y1
+          angle = -angle
+        else
+          angle = 90 + (90 - angle)
+        end
+      else
+        if y2 < y1
+          angle = 270 + (90 - angle)
+        else
+          angle = 180 - angle
+        end
+      end
+      return angle
     end
 
   end
