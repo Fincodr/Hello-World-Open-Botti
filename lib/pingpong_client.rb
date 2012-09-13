@@ -1,3 +1,26 @@
+#
+#     _/_/_/_/  _/                                      _/
+#    _/            _/_/_/      _/_/_/    _/_/      _/_/_/  _/  _/_/
+#   _/_/_/    _/  _/    _/  _/        _/    _/  _/    _/  _/_/
+#  _/        _/  _/    _/  _/        _/    _/  _/    _/  _/
+# _/        _/  _/    _/    _/_/_/    _/_/      _/_/_/  _/
+#
+# Copyright (c) 2012 Mika Luoma-aho <fincodr@mxl.fi>
+#
+# This source code and software is provided 'as-is', without any express or implied warranty.
+# In no event will the authors be held liable for any damages arising from the use of this source code or software.
+#
+# Permission is granted to HelloWorldOpen organization to use this software and sourcecode as part of the
+# HelloWorldOpen competition as explained in the HelloWorldOpen competition rules.
+#
+# You are however subject to the following restrictions:
+#
+# 1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software.
+#    If you use this software's source code in a product, an acknowledgment in the documentation will be required.
+# 2. Altered versions must be plainly marked as such, and must not be misrepresented as being the original software.
+# 3. This notice may not be removed or altered from any distribution.
+# 4. Contact author if you need special licensing or usage terms.
+#
 require 'socket'
 require 'json'
 require 'fileutils'
@@ -17,14 +40,15 @@ module Pingpong
 
       # banner
       @log.write ""
-      @log.write " _______ __                      __       "
-      @log.write "|    ___|__|.-----.----.-----.--|  |.----."
-      @log.write "|    ___|  ||     |  __|  _  |  _  ||   _|"
-      @log.write "|___|   |__||__|__|____|_____|_____||__|  "
+      @log.write "    _______ __                      __       "
+      @log.write "   |    ___|__|.-----.----.-----.--|  |.----."
+      @log.write "   |    ___|  ||     |  __|  _  |  _  ||   _|"
+      @log.write "   |___|   |__||__|__|____|_____|_____||__|  "
       @log.write ""
-      @log.write "   H e l l o W o r l d O p e n   B o t"
-      @log.write "   Coded by Fincodr aka Mika Luoma-aho"
-      @log.write "   Send job offers to <fincodr@mxl.fi>"
+      @log.write "   H e l l o W o r l d O p e n   B o t  v0.7"
+      @log.write ""
+      @log.write "      Coded by Fincodr aka Mika Luoma-aho"
+      @log.write "      Send job offers to <fincodr@mxl.fi>"
       @log.write ""
 
       # log initialize parameters
@@ -35,6 +59,13 @@ module Pingpong
       @enemyPaddle = Helpers::Paddle.new
       @ball = Helpers::Ball.new
       @math = Helpers::Math.new
+      @scores = Hash.new
+
+      @player_name = player_name
+
+      @total_rounds = 0
+      @win_count = 0
+      @lose_count = 0
 
       reset_round
 
@@ -57,9 +88,13 @@ module Pingpong
       # last updated timestamps
       @updatedLastTimestamp = 0
       @updatedDeltaTime = 0
-      @updateRate = 1000/9.5 # limit send rate to ~9.5 msg/s
+      @updateRate = 1000/10 # limit send rate to ~10 msg/s
 
       # AI settings
+      @AI_level = 1.0 # 1.0 = hardest and -1.0 easiest (helps the opponent side)
+      @paddle_slowdown_margin = 25
+      @target_offset = 0 # check if paddle up/down sides are correct and adjust!
+      @max_paddle_speed = 1.0
       @last_sent_changedir = -99.0
       @max_iterations = 10
       @last_enter_angle = 0
@@ -67,9 +102,11 @@ module Pingpong
       @last_dirX = 0
       @last_deviation = 0
       @hit_offset = 0
-      @hit_offset_max = 25
-      @last_velocity = 0
+      @hit_offset_max = 0 # will be set again in the update phase
+      @last_velocity = 0 
       @max_velocity = 0
+      @hit_offset_power = 0
+      @old_offset_power = 0
 
       # default configuration
       # will be updated from the gameIsOn server message
@@ -82,6 +119,9 @@ module Pingpong
       @ball.set_position( 640/2, 480/2 )
       @ownPaddle.set_y( 480/2 )
       @enemyPaddle.set_y( 480/2 )
+
+      # round info
+      @total_rounds += 1
 
     end
 
@@ -136,7 +176,7 @@ module Pingpong
               @config.set_arena( msg_conf['maxWidth'], msg_conf['maxHeight'] )
               @config.set_paddle( msg_conf['paddleWidth'], msg_conf['paddleHeight'] )
               @config.set_ball( msg_conf['ballRadius'] )
-              h = msg_conf['paddleHeight'] / 2 - (@config.ballRadius)
+              h = msg_conf['paddleHeight'] / 2 - ((@config.ballRadius))
               if ( h < 5 )
                 h = 0
               end
@@ -170,7 +210,7 @@ module Pingpong
               y2 = @ball.y
               @last_velocity = Math.hypot( x2-x3,y2-y3 ) / @server_time_delta
               if @last_velocity > @max_velocity
-                #@log.debug "Max Velocity now #{@last_velocity}\tElapsed time = #{@server_time_elapsed}"
+                @log.debug "Max Velocity now #{@last_velocity}\tElapsed time = #{@server_time_elapsed}"
                 @max_velocity = @last_velocity
               end
 
@@ -179,6 +219,11 @@ module Pingpong
               @hit_offset_power = 1.0 - (@max_velocity-0.250)
               @hit_offset_power = 1.0 if @hit_offset_power > 1.0
               @hit_offset_power = 0.0 if @hit_offset_power < 0.0
+
+              if @hit_offset_power != @old_offset_power
+                #@log.debug "Offset power now at #{@hit_offset_power} (max velocity #{@max_velocity}"
+                @old_offset_power = @hit_offset_power
+              end
 
               @log.write "Info: Server time delta = #{@server_time_delta}" if $DEBUG
               #$stderr.puts "Info: Last velocity = #{@last_velocity}"
@@ -236,10 +281,29 @@ module Pingpong
                     if y1 < @config.paddleHeight or y1 > (@config.arenaHeight - @config.paddleHeight)
                       @hit_offset = 0
                     else
+                      temp_AI_level = @AI_level
                       if @last_enter_angle <= 90
-                        @hit_offset = -(@hit_offset_max * @hit_offset_power)
+                        if @AI_level < 0
+                          # we are helping opponent :)
+                          if @last_enter_angle >= 90-15
+                            @deviation_from_straight = ( 90 - @last_enter_angle ) / 15
+                          else
+                            @deviation_from_straight = 1.0
+                          end
+                          temp_AI_level *= @deviation_from_straight
+                        end
+                        @hit_offset = -(@hit_offset_max * @hit_offset_power) * temp_AI_level
                       else
-                        @hit_offset = (@hit_offset_max * @hit_offset_power)
+                        if @AI_level < 0
+                          # we are helping opponent :)
+                          if @last_enter_angle < 90+15
+                            @deviation_from_straight = ( @last_enter_angle - 90 ) / 15
+                          else
+                            @deviation_from_straight = 1.0
+                          end
+                          temp_AI_level *= @deviation_from_straight
+                        end
+                        @hit_offset = (@hit_offset_max * @hit_offset_power) * temp_AI_level
                       end
                     end
                     @ownPaddle.set_target(y1 + @hit_offset)
@@ -286,9 +350,37 @@ module Pingpong
                     x1 = @config.paddleWidth + @config.ballRadius
                     y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
                     distance_to_player += Math.hypot( x1-x2,y1-y2 )
-                    @ownPaddle.set_target(y1)
                     # calculate current angle
                     @last_enter_angle = @math.calculate_line_angle( x1, y1, x2, y2 )
+                    if y1 < @config.paddleHeight or y1 > (@config.arenaHeight - @config.paddleHeight)
+                      @hit_offset = 0
+                    else
+                      temp_AI_level = @AI_level
+                      if @last_enter_angle <= 90
+                        if @AI_level < 0
+                          # we are helping opponent :)
+                          if @last_enter_angle >= 90-15
+                            @deviation_from_straight = ( 90 - @last_enter_angle ) / 15
+                          else
+                            @deviation_from_straight = 1.0
+                          end
+                          temp_AI_level *= @deviation_from_straight
+                        end
+                        @hit_offset = -(@hit_offset_max * @hit_offset_power) * temp_AI_level
+                      else
+                        if @AI_level < 0
+                          # we are helping opponent :)
+                          if @last_enter_angle < 90+15
+                            @deviation_from_straight = ( @last_enter_angle - 90 ) / 15
+                          else
+                            @deviation_from_straight = 1.0
+                          end
+                          temp_AI_level *= @deviation_from_straight
+                        end
+                        @hit_offset = (@hit_offset_max * @hit_offset_power) * temp_AI_level
+                      end
+                    end
+                    @ownPaddle.set_target(y1 + @hit_offset)
                     @log.write "Info: Own enter angle = #{@last_enter_angle}" if $DEBUG
                     #@log.debug "Ball is going to hit at #{x1}, #{y1} with distance of #{distance_to_player} pixels."
                     break
@@ -302,9 +394,12 @@ module Pingpong
                     distance_to_enemy += Math.hypot( x1-x2,y1-y2 )
                     @enemyPaddle.set_target(y1)
                     # calculate current angle
-                    @last_enter_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
-                    @log.write "Info: Enemy enter angle = #{@last_enter_angle}" if $DEBUG
-                    distance_to_paddle = (y1 - @enemyPaddle.y).abs
+                    #@last_enter_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
+                    #@log.write "Info: Enemy enter angle = #{@last_enter_angle}" if $DEBUG
+                    #
+                    # TODO:
+                    #
+                    #distance_to_paddle = (y1 - @enemyPaddle.y).abs
                     #
                     # calculate how many seconds it takes the ball to hit the enemy side
                     # calculate where enemy is going to be at that time
@@ -313,6 +408,7 @@ module Pingpong
                     #delta = (distance_to_enemy - distance_to_paddle)
                     #@log.debug "BallHit @ #{y1} (dist=#{distance_to_enemy}px), p-dist=#{distance_to_paddle} #{delta})"
                     # bounce ball back and continue
+                    #
                     x2 = x1
                     y2 = y1
                     x3 = x2 + deltaX
@@ -366,43 +462,50 @@ module Pingpong
                 @ownPaddle.set_target( @config.arenaHeight - @config.paddleHeight/2 - 2 )
               end if
 
-              delta = (@ownPaddle.y + (@config.paddleHeight / 2) - (@ownPaddle.target_y - @config.ballRadius/4)).abs
+              delta = (@ownPaddle.y + (@config.paddleHeight / 2) - (@ownPaddle.target_y - @target_offset)).abs
 
-              speed = 1.0
+              speed = @max_paddle_speed
 
-              if ( delta < 30 )
-                speed = delta/30
+              if ( delta < @paddle_slowdown_margin )
+                speed = delta/@paddle_slowdown_margin
               end
 
-              #if ( delta < 10 )
-              #  speed = 0
-              #end
+              if speed > @max_paddle_speed
+                speed = @max_paddle_speed
+              end
 
-              #if @last_dirX < 0 && @ball.x < @config.paddleWidth + 25
-              #    tcp.puts movement_message(-1.0)
-              #else
-                if (@ownPaddle.y + (@config.paddleHeight / 2)) < (@ownPaddle.target_y - @config.ballRadius/4)
-                  #if @last_sent_changedir != speed
-                    @log.write "> changeDir(#{speed})" if $DEBUG
-                    #@last_sent_changedir = speed
-                    tcp.puts movement_message(speed)
-                  #end
-                else
-                  #if @last_sent_changedir != -speed
-                    @log.write "> changeDir(#{-speed})" if $DEBUG
-                    #@last_sent_changedir = -speed
-                    tcp.puts movement_message(-speed)
-                  #end
-                end
-              #end             
+              if (@ownPaddle.y + (@config.paddleHeight / 2)) < (@ownPaddle.target_y - @target_offset)
+                #if @last_sent_changedir != speed
+                  @log.write "> changeDir(#{speed})" if $DEBUG
+                  #@last_sent_changedir = speed
+                  tcp.puts movement_message(speed)
+                #end
+              else
+                #if @last_sent_changedir != -speed
+                  @log.write "> changeDir(#{-speed})" if $DEBUG
+                  #@last_sent_changedir = -speed
+                  tcp.puts movement_message(-speed)
+                #end
+              end
 
             end # /if
 
           when 'gameIsOver'
-            @log.write "< gameIsOver: Winner is #{message['data']}"
-            @log.debug "gameIsOver: Winner is #{message['data']}" if $DEBUG
+            winner = message['data']
+            if winner == @player_name
+              @win_count += 1
+            else
+              @lose_count += 1
+            end
+            @log.write "< gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}"
+            @log.debug "gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}" if $DEBUG
+            if @scores.has_key?(winner)
+              @scores[winner]+=1 # increment score for specified playername
+            else
+              @scores[winner]=1
+            end
+            @scores.each {|key, value| @log.write "Info: Scores: #{key}: #{value}" }
             reset_round
-
           else
             # unknown message received
             @log.write "< unknown_message: #{json}" if $DEBUG
