@@ -28,6 +28,7 @@ require 'fileutils'
 require 'time'
 require 'date'
 require 'launchy'
+require 'benchmark' if $DEBUG
 require_relative 'helpers'
 
 module Pingpong
@@ -80,7 +81,7 @@ module Pingpong
       # Set starting values
       @server_time = 0
       @server_time_elapsed = 0
-      @server_time_delta = 0
+      @server_time_delta = nil
       @local_time = get_localtimestamp
       @local_time_elapsed = 0
       @local_time_delta = 0
@@ -88,11 +89,12 @@ module Pingpong
       # last updated timestamps
       @updatedLastTimestamp = 0
       @updatedDeltaTime = 0
-      @updateRate = 1000/10 # limit send rate to ~10 msg/s
+      @updateRate = 1000/9.9 # limit send rate to ~9.9 msg/s
 
       # AI settings
-      @AI_level = 1.0 # 1.0 = hardest and -1.0 easiest (helps the opponent side)
+      @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
       @paddle_slowdown_margin = 25
+      @paddle_slowdown_power = 0
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
       @max_paddle_speed = 1.0
       @last_sent_changedir = -99.0
@@ -103,10 +105,11 @@ module Pingpong
       @last_deviation = 0
       @hit_offset = 0
       @hit_offset_max = 0 # will be set again in the update phase
-      @last_velocity = 0 
-      @max_velocity = 0
+      @last_velocity = nil
+      @max_velocity = nil
       @hit_offset_power = 0
       @old_offset_power = 0
+      @last_avg_velocity = nil
 
       # default configuration
       # will be updated from the gameIsOn server message
@@ -117,11 +120,16 @@ module Pingpong
 
       # set class to default values
       @ball.set_position( 640/2, 480/2 )
-      @ownPaddle.set_y( 480/2 )
-      @enemyPaddle.set_y( 480/2 )
+      @ownPaddle.reset
+      @enemyPaddle.reset
 
       # round info
       @total_rounds += 1
+
+      # temp
+      @wanted_y = 240+25
+      @old_wanted_y = @wanted_y
+      @passed_wanted_y = false
 
     end
 
@@ -149,8 +157,6 @@ module Pingpong
 
             if $DEBUG
               @log.write "< gameIsOn: #{json}"
-            else
-              @log.write "< gameIsOn: event fired"
             end
             msg = message['data']
 
@@ -176,7 +182,7 @@ module Pingpong
               @config.set_arena( msg_conf['maxWidth'], msg_conf['maxHeight'] )
               @config.set_paddle( msg_conf['paddleWidth'], msg_conf['paddleHeight'] )
               @config.set_ball( msg_conf['ballRadius'] )
-              h = msg_conf['paddleHeight'] / 2 - ((@config.ballRadius))
+              h = msg_conf['paddleHeight'] / 2 - ((@config.ballRadius+1)) # varmuuden vuoksi vielä 1 lisää marginaaliin :)
               if ( h < 5 )
                 h = 0
               end
@@ -186,11 +192,12 @@ module Pingpong
             end
 
             # update player information from json packet
+            # player information is stored internally so that y is the center of paddle
             begin
               msg_own = msg['left']
               msg_enemy = msg['right']
-              @ownPaddle.set_position( 0, Float(msg_own['y']) )
-              @enemyPaddle.set_position( @config.arenaWidth, Float(msg_enemy['y']) )
+              @ownPaddle.set_position( 0, Float(msg_own['y']) + @config.paddleHeight/2 )
+              @enemyPaddle.set_position( @config.arenaWidth, Float(msg_enemy['y']) + @config.paddleHeight/2 )
             rescue
               @log.write "Warning: Player block missing from json packet"
             end
@@ -201,6 +208,11 @@ module Pingpong
             #
             # If all points are on the same line, we can calculate ball trajectory
             #
+            distance_to_player = 0
+            distance_to_enemy = 0
+            last_deltaX = 0
+            last_deltaY = 0
+
             if @math.on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
 
               # set the start position
@@ -208,17 +220,73 @@ module Pingpong
               y3 = @ball.y2
               x2 = @ball.x
               y2 = @ball.y
-              @last_velocity = Math.hypot( x2-x3,y2-y3 ) / @server_time_delta
-              if @last_velocity > @max_velocity
-                @log.debug "Max Velocity now #{@last_velocity}\tElapsed time = #{@server_time_elapsed}"
-                @max_velocity = @last_velocity
+
+              # calculate velocity if the clock has advanced
+              if not @server_time_delta.nil?
+
+                velocity = Math.hypot( x2-x3,y2-y3 ) / @server_time_delta
+
+                # calculate average velocity
+                if not @last_velocity.nil?
+                  @last_avg_velocity = (@last_velocity + velocity) / 2
+                  #@log.debug "#{@last_velocity} + #{velocity} / 2 = #{@last_avg_velocity}"
+                  if not @max_velocity.nil?
+                    if @last_avg_velocity > @max_velocity
+                      @max_velocity = @last_avg_velocity
+                    end
+                  else
+                    @max_velocity = @last_avg_velocity
+                  end
+                else
+                  @last_avg_velocity = nil
+                end
+
+                @last_velocity = velocity
+
+                #if @max_velocity != nil
+                #  if @last_velocity > @max_velocity
+                #    #@log.debug "Max Velocity now #{@last_velocity},Elapsed time = #{@server_time_elapsed}"
+                #    @max_velocity = @last_velocity
+                #  end
+                #else
+                #  @max_velocity = @last_velocity
+                #end
+
               end
 
-              # scale hit_offset depending on the max velocity
-              # note: starting velocity is usually about 0.250
-              @hit_offset_power = 1.0 - (@max_velocity-0.250)
-              @hit_offset_power = 1.0 if @hit_offset_power > 1.0
-              @hit_offset_power = 0.0 if @hit_offset_power < 0.0
+              # when velocity gets over 0.5 we must try to win on the next pass
+              #@log.debug "Avg Velocity = #{@last_avg_velocity}, Max Velocity = #{@last_velocity}, Elapsed time = #{@server_time_elapsed}"
+              if not @last_avg_velocity.nil?
+                if @last_avg_velocity > 0.5
+                  @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
+                end
+              end
+
+              last_deltaX = x2-x3
+              last_deltaY = y2-y3
+
+              if not @last_avg_velocity.nil?
+                # set the paddle slowdown power depending on the last velocity reading
+                #
+                # paddle slowdown power is calculated from normal velocity to velocity + 0.5
+                # and scaled accordingly so when velocity is 0.5 or over we get slowdown power
+                # of zero (= no slowdown, but on the sides it will still always slowdown
+                # atleast with margin of 5
+                @paddle_slowdown_power = 1.0 - (@last_velocity - 0.250)
+                @paddle_slowdown_power = 1.0 if @paddle_slowdown_power > 1.0
+                @paddle_slowdown_power = 0.5 if @paddle_slowdown_power < 0.5
+                @paddle_slowdown_power -= 0.5
+                @paddle_slowdown_power *= 2
+
+                # scale hit_offset depending on the last velocity
+                # note: starting velocity is usually about 0.250
+                @hit_offset_power = 1.0 - ( @last_velocity - 0.250 )
+                @hit_offset_power = 1.0 if @hit_offset_power > 1.0
+                @hit_offset_power = 0.0 if @hit_offset_power < 0.0
+              else
+                @paddle_slowdown_power = 1.0
+                @hit_offset_power = 1.0
+              end                
 
               if @hit_offset_power != @old_offset_power
                 #@log.debug "Offset power now at #{@hit_offset_power} (max velocity #{@max_velocity}"
@@ -256,7 +324,6 @@ module Pingpong
 
                 # ball is coming towards us
                 iterator = 0
-                distance_to_player = 0
 
                 while iterator < @max_iterations
 
@@ -276,6 +343,7 @@ module Pingpong
                     x1 = @config.paddleWidth + @config.ballRadius
                     y1 = @math.calculate_collision(x1, y2, x2, y3, x3)
                     distance_to_player += Math.hypot( x1-x2,y1-y2 )
+
                     # calculate current angle
                     @last_enter_angle = @math.calculate_line_angle( x1, y1, x2, y2 )
                     if y1 < @config.paddleHeight or y1 > (@config.arenaHeight - @config.paddleHeight)
@@ -329,9 +397,7 @@ module Pingpong
                 # ball is going to opposite side
                 # we can still calculate where it would hit and how it would bounce back to us
                 iterator = 0
-                distance_to_player = 0
-                distance_to_enemy = 0
-
+                
                 while iterator < @max_iterations*2
 
                   deltaX = x2-x3
@@ -438,7 +504,7 @@ module Pingpong
 
                 if iterator == @max_iterations*2
                   # ok, too much work, we can just go to middle
-                  @ownPaddle.set_target( @config.arenaHeight / 2 )
+                  #@ownPaddle.set_target( @config.arenaHeight / 2 )
                 end
 
               end # /if
@@ -449,43 +515,56 @@ module Pingpong
             #
             ###############################################
 
-            if @local_time - @updatedLastTimestamp > @updateRate              
+            if @local_time - @updatedLastTimestamp > @updateRate && @ownPaddle.avg_target_y != nil
 
               @updatedLastTimestamp = @local_time
 
-              # send update to server about the direction we should be going
-              if ( @ownPaddle.target_y < @config.paddleHeight / 2 + 2 )
-                @ownPaddle.set_target( @config.paddleHeight / 2 + 2 )
-              end if
-
-              if ( @ownPaddle.target_y > @config.arenaHeight - @config.paddleHeight/2 - 2 )
-                @ownPaddle.set_target( @config.arenaHeight - @config.paddleHeight/2 - 2 )
-              end if
-
-              delta = (@ownPaddle.y + (@config.paddleHeight / 2) - (@ownPaddle.target_y - @target_offset)).abs
-
-              speed = @max_paddle_speed
-
-              if ( delta < @paddle_slowdown_margin )
-                speed = delta/@paddle_slowdown_margin
+              min_slowdown = 0
+              @wanted_y = @ownPaddle.avg_target_y
+              if @wanted_y < @config.paddleHeight/2 + 1
+                @wanted_y = @config.paddleHeight/2 + 1
+                min_slowdown = 5
+              end
+              if @wanted_y > @config.arenaHeight - @config.paddleHeight/2 - 2
+                @wanted_y = @config.arenaHeight - @config.paddleHeight/2 - 2
+                min_slowdown = 5
               end
 
+              if @wanted_y != @old_wanted_y
+                @intial_wanted_run = true
+              end
+
+              speed = @max_paddle_speed
+              delta = @ownPaddle.y - @wanted_y
+              #@log.debug "Wanted: #{@wanted_y} -> Got: #{@ownPaddle.y} -> Delta = #{delta} (#{@paddle_slowdown_power})"
+
+              paddle_slowdown = @paddle_slowdown_margin * @paddle_slowdown_power
+              if paddle_slowdown < min_slowdown
+                paddle_slowdown = min_slowdown
+              end
+              if delta.abs < paddle_slowdown
+                speed = delta.abs / paddle_slowdown
+              end
               if speed > @max_paddle_speed
                 speed = @max_paddle_speed
               end
 
-              if (@ownPaddle.y + (@config.paddleHeight / 2)) < (@ownPaddle.target_y - @target_offset)
-                #if @last_sent_changedir != speed
-                  @log.write "> changeDir(#{speed})" if $DEBUG
-                  #@last_sent_changedir = speed
-                  tcp.puts movement_message(speed)
-                #end
+              # ball distance is more than our delta
+              # so move the paddle at maximum speed
+              #if distance_to_player <= delta
+              #  speed = 1.0
+              #end
+
+
+              if delta < 0
+                @log.write "> changeDir(#{speed})" if $DEBUG
+                tcp.puts movement_message(speed)
+              elsif delta > 0
+                @log.write "> changeDir(#{-speed})" if $DEBUG
+                tcp.puts movement_message(-speed)
               else
-                #if @last_sent_changedir != -speed
-                  @log.write "> changeDir(#{-speed})" if $DEBUG
-                  #@last_sent_changedir = -speed
-                  tcp.puts movement_message(-speed)
-                #end
+                @log.write "> changeDir(0)" if $DEBUG
+                tcp.puts movement_message(0)
               end
 
             end # /if
@@ -506,6 +585,7 @@ module Pingpong
             end
             @scores.each {|key, value| @log.write "Info: Scores: #{key}: #{value}" }
             reset_round
+
           else
             # unknown message received
             @log.write "< unknown_message: #{json}" if $DEBUG

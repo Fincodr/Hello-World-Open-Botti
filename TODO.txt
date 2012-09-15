@@ -9,6 +9,8 @@ Version 0.4: Lots of refactoring. Complex AI implemented, simple bounce physics.
 Version 0.1: Initial version. Very dummy AI implemented.
 
 TODO:
+* Kun vauhti kiihtyy alkaa mailan liike olla liian randomia, johtuuko
+  ennakoinnista josta aiheutuu pyöristysvirheitä tms?
 * Jos pallo osumassa reunaan, niin mailan pitää hidastaa rauhallisesti eikä
   tehdä enää nopeita korjausliikkeitä lähellä reunaa koska korjausliike
   heijastuu 100% takaisin eli reunoissa ns. dampening kerroin voimistuu.

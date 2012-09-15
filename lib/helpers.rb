@@ -111,7 +111,8 @@ module Helpers
     def initialize
       @x = 0
       @y = 0
-      @target_y = 0
+      @target_y = nil
+      @avg_target_y = nil
     end
     def set_y( y )
       @y = y
@@ -120,15 +121,34 @@ module Helpers
       @x = x
       @y = y
     end
+    def reset
+      # clear values
+      @y = 0
+      @avg_target_y = nil
+      @target_y = nil
+    end    
     def set_target( y )
+      # also calculate average from two sets
+      if @target_y != nil
+        @avg_target_y = (@target_y + y) / 2
+      else
+        # no previous result available so set average to nil
+        @avg_target_y = nil
+      end
       @target_y = y
     end
     attr_reader :x
     attr_reader :y
     attr_reader :target_y
+    attr_reader :avg_target_y
   end # /class
 
   class Math
+
+    def is_close_to( a, diff = 0.001 )
+      return true if ( a < diff )
+      return false
+    end
 
     def calculate_collision(y1, x2, y2, x3, y3)
       x1 = x3 - ((x2 - x3) / (y2 - y3)) * (y3 - y1)
@@ -137,8 +157,8 @@ module Helpers
 
     def on_the_same_line(x1, y1, x2, y2, x3, y3)
       begin
-        return true if y1 == y2 && y2 == y3
-        return true if x1 == x2 && x2 == x3
+        return true if is_close_to(y1, y2) && is_close_to(y2, y3)
+        return true if is_close_to(x1, x2) && is_close_to(x2, x3)
         amount = ((x3-x1) - ((x2 - x3) / (y2 - y3)) * (y3 - y1)).abs
         if amount < 2.0
           return true
@@ -174,17 +194,5 @@ module Helpers
     end
 
   end
-
-  ###############################################
-  # Function: predict_ball_position
-  #
-  # predicts ball trajectory from the start position
-  # to either end of the arena
-  # returns:
-  # nil - if no end position can be predicted at this time
-  # Point (class) - x and y position of the predicted location
-  #
-  def predict_ball_position(xPrev, yPrev, x, y)
-  end  
 
 end # /module
