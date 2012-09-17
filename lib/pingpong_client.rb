@@ -1,3 +1,5 @@
+#encoding: utf-8
+
 #
 #     _/_/_/_/  _/                                      _/
 #    _/            _/_/_/      _/_/_/    _/_/      _/_/_/  _/  _/_/
@@ -97,8 +99,8 @@ module Pingpong
       @updateRate = 1000/9.9 # limit send rate to ~9.9 msg/s
 
       # AI settings
-      @AI_level = 0.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
-      @paddle_safe_margin = 3
+      @AI_level = -1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
+      @paddle_safe_margin = 5
       @paddle_slowdown_margin = 25
       @paddle_slowdown_power = 0
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
@@ -198,9 +200,9 @@ module Pingpong
             # update configuration information from json packet
             begin
               msg_conf = msg['conf']
-              @config.set_arena( msg_conf['maxWidth'], msg_conf['maxHeight'] )
-              @config.set_paddle( msg_conf['paddleWidth'], msg_conf['paddleHeight'] )
-              @config.set_ball( msg_conf['ballRadius'] )
+              @config.set_arena( Float(msg_conf['maxWidth']), Float(msg_conf['maxHeight']) )
+              @config.set_paddle( Float(msg_conf['paddleWidth']), Float(msg_conf['paddleHeight']) )
+              @config.set_ball( Float(msg_conf['ballRadius']) )
               h = msg_conf['paddleHeight'] / 2 - @paddle_safe_margin # varmuuden vuoksi vielä 1 lisää marginaaliin :)
               if ( h < 5 )
                 h = 0
@@ -277,11 +279,6 @@ module Pingpong
 
               # when velocity gets over 0.5 we must try to win on the next pass
               #@log.debug "Velocity = #{@last_velocity}, Max Velocity = #{@max_velocity}, Elapsed time = #{@server_time_elapsed}"
-              #if not @max_velocity.nil?
-              #  if @max_velocity > 0.4
-              #    @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
-              #  end
-              #end
 
               last_deltaX = x2-x3
               last_deltaY = y2-y3
@@ -304,6 +301,11 @@ module Pingpong
                 @hit_offset_power = 1.0 - ( @last_velocity - 0.250 )
                 @hit_offset_power = 1.0 if @hit_offset_power > 1.0
                 @hit_offset_power = 0.0 if @hit_offset_power < 0.0
+
+                # scale hit_offset depending on the estimated enter angle
+                # safe angles are -25 .. +25 and anything over that should decrement the power
+                angle_hit_offset_power = @math.angle_to_hit_offset_power @last_enter_angle
+                @hit_offset_power *= angle_hit_offset_power
               else
                 @paddle_slowdown_power = 1.0
                 @hit_offset_power = 1.0
@@ -327,6 +329,11 @@ module Pingpong
               if dirX != @last_dirX
                 if dirX > 0
                   #@log.write "Info: Direction changed, now going towards enemy" if $DEBUG
+                  if not @max_velocity.nil?
+                    if @max_velocity > 0.3
+                      @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
+                    end
+                  end
                   @last_exit_angle = @math.calculate_line_angle( x3, y3, x2, y2 )
                   @log.write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
                   # check deviation from normal bounce angle
@@ -549,14 +556,17 @@ module Pingpong
               @updatedLastTimestamp = @local_time
 
               min_slowdown = 0
+              is_at_border = false
               @wanted_y = @ownPaddle.target_y #.avg_target_y
               if @wanted_y < @config.paddleHeight/2 + 1
                 @wanted_y = @config.paddleHeight/2 + 1
                 min_slowdown = 5
+                is_at_border = true
               end
               if @wanted_y > @config.arenaHeight - @config.paddleHeight/2 - 2
                 @wanted_y = @config.arenaHeight - @config.paddleHeight/2 - 2
                 min_slowdown = 5
+                is_at_border = true
               end
 
               if @wanted_y != @old_wanted_y
@@ -590,6 +600,14 @@ module Pingpong
               #    speed = (@ownPaddle.y - @enemyPaddle.y).abs / 10
               #  end
               #end
+
+              # Quickly move to the ball direction if the ball is
+              # very close
+              if distance_to_player < 25 && @last_dirX < 0 && is_at_border == false
+                #@log.debug "Trying to speedup at the end."
+                speed = 1.0
+                delta = -last_deltaY * @AI_level
+              end
 
               if delta < 0
                 @log.write "> changeDir(#{speed})" if $DEBUG
