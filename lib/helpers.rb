@@ -84,12 +84,15 @@ module Helpers
   #
   class Ball
     def initialize
-      @x = 0
-      @y = 0
-      @x2 = 0
-      @y2 = 0
-      @x3 = 0
-      @y3 = 0
+      reset
+    end
+    def reset
+      @x = nil
+      @y = nil
+      @x2 = nil
+      @y2 = nil
+      @x3 = nil
+      @y3 = nil
     end
     def set_position(x, y)
       @x3 = @x2
@@ -109,23 +112,17 @@ module Helpers
 
   class Paddle
     def initialize
-      @x = 0
-      @y = 0
-      @target_y = nil
-      @avg_target_y = nil
-    end
-    def set_y( y )
-      @y = y
+      reset
     end
     def set_position( x, y )
       @x = x
       @y = y
     end
     def reset
-      # clear values
+      @x = 0
       @y = 0
-      @avg_target_y = nil
       @target_y = nil
+      @avg_target_y = nil
     end    
     def set_target( y )
       # also calculate average from two sets
@@ -145,8 +142,8 @@ module Helpers
 
   class Math
 
-    def is_close_to( a, diff = 0.001 )
-      return true if ( a < diff )
+    def is_close_to( a, b, diff = 0.001 )
+      return true if ( (a-b).abs < diff )
       return false
     end
 
@@ -157,10 +154,10 @@ module Helpers
 
     def on_the_same_line(x1, y1, x2, y2, x3, y3)
       begin
-        return true if is_close_to(y1, y2) && is_close_to(y2, y3)
-        return true if is_close_to(x1, x2) && is_close_to(x2, x3)
-        amount = ((x3-x1) - ((x2 - x3) / (y2 - y3)) * (y3 - y1)).abs
-        if amount < 2.0
+        return true if is_close_to(y1, y2) && is_close_to(y1, y3)
+        return true if is_close_to(x1, x2) && is_close_to(x1, x3)
+        amount = ((x3-x1).abs - ((x2 - x3).abs / (y2 - y3).abs) * (y3 - y1).abs).abs
+        if amount < 1
           return true
         else
           return false
