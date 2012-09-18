@@ -144,11 +144,11 @@ module Helpers
 
     def angle_to_hit_offset_power a
       a = (a - 90).abs # rotate to ccw 90 degrees and get difference from zero angle
-      a -= 20 # no reduction if angle is lower or equal to 20
+      a -= 10 # no reduction if angle is lower or equal to 10
       # cap angle to 45 max
       a = 0 if a < 0
-      a = 45 if a > 45
-      return( 1.0 - (Float(a) / 100) )
+      a = 50 if a > 50
+      return( 1.0 - (Float(a) / 50) )
     end
 
     def is_close_to( a, b, diff = 0.001 )
@@ -159,6 +159,26 @@ module Helpers
     def calculate_collision(y1, x2, y2, x3, y3)
       x1 = x3 - ((x2 - x3) / (y2 - y3)) * (y3 - y1)
       return x1
+    end
+
+    # create new function to return the correct x1,y1,x2,y2,x3,y3
+    # values automatically from input x1,y1,x2,y2,x3,y3
+    # note: for case 1, calculate impact position and use
+    #       that as the source point for calculating
+    #       the exit angle.
+
+    def is_p3_on_the_same_p1p2_line(x1, y1, x2, y2, x3, y3)
+      a = Float(x2-x1)
+      b = Float(y2-y1)
+      return false if (a == 0 && b != 0) || (b == 0 && a != 0)
+      return ((x3-x1)-(a/b)*(y3-y1)).abs<2
+    end
+
+    def is_p1_on_the_same_p2p3_line(x1, y1, x2, y2, x3, y3)
+      a = Float(x2-x3)
+      b = Float(y2-y3)
+      return false if (a == 0 && b != 0) || (b == 0 && a != 0)
+      return ((x1-x3)-(a/b)*(y1-y3)).abs<2
     end
 
     def on_the_same_line(x1, y1, x2, y2, x3, y3)

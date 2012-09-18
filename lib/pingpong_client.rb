@@ -37,7 +37,7 @@ module Pingpong
 
   class Client
 
-    def initialize(player_name, server_host, server_port)
+    def initialize(player_name, server_host, server_port, other_name = nil)
 
       @log = Helpers::Log.new
 
@@ -56,7 +56,11 @@ module Pingpong
       $stdout.flush
 
       # log initialize parameters
-      @log.write "initialize(#{player_name}, #{server_host}, #{server_port})"
+      if other_name.nil?
+        @log.write "initialize(#{player_name}, #{server_host}, #{server_port})"
+      else
+        @log.write "initialize(#{player_name}, #{server_host}, #{server_port}, #{other_name})"
+      end
       
       # Initialize global classes
       @config = Helpers::Configuration.new()
@@ -76,7 +80,11 @@ module Pingpong
 
       # open socket to server
       tcp = TCPSocket.open(server_host, server_port)
-      play(player_name, tcp)
+      if other_name.nil?
+        play(player_name, tcp)
+      else
+        duel(player_name, other_name, tcp)
+      end
     end
 
     private
@@ -102,7 +110,7 @@ module Pingpong
       @updateRate = 1000/9.9 # limit send rate to ~9.9 msg/s
 
       # AI settings
-      @AI_level = -1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
+      @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
       @paddle_safe_margin = 6
       @paddle_slowdown_margin = 25
       @paddle_slowdown_power = 0
@@ -144,6 +152,12 @@ module Pingpong
 
     end
 
+    def duel(player_name, other_name, tcp)
+      @log.write "> duel(#{player_name} vs #{other_name})"
+      tcp.puts duel_message(player_name, other_name)
+      react_to_messages_from_server tcp
+    end
+
     def play(player_name, tcp)
       @log.write "> join(#{player_name})"
       tcp.puts join_message(player_name)
@@ -157,7 +171,7 @@ module Pingpong
 
           when 'joined'
             @log.write "< joined: #{json}"
-            #Launchy.open(message['data'])
+            Launchy.open(message['data'])
 
           when 'gameStarted'
             @log.write "< gameStarted: #{json}"
@@ -308,7 +322,7 @@ module Pingpong
 
                 # scale hit_offset depending on the last velocity
                 # note: starting velocity is usually about 0.250
-                @hit_offset_power = 1.0 - ( @last_velocity - 0.250 )
+                @hit_offset_power = 1.0 - ( @max_velocity - 0.250 )
                 @hit_offset_power = 1.0 if @hit_offset_power > 1.0
                 @hit_offset_power = 0.0 if @hit_offset_power < 0.0
 
@@ -327,7 +341,7 @@ module Pingpong
                   rescue
                     location_hit_offset_power = 1.0
                   end
-                  #@hit_offset_power *= location_hit_offset_power
+                  @hit_offset_power *= location_hit_offset_power
                   #@log.debug "Location hit offset power in effect at #{location_hit_offset_power}"
                 end
 
@@ -339,7 +353,7 @@ module Pingpong
               end                
 
               if @hit_offset_power != @old_offset_power
-                #@log.debug "Offset power now at #{@hit_offset_power} (max velocity #{@max_velocity}"
+                @log.debug "Offset power now at #{@hit_offset_power} (max velocity #{@max_velocity}"
                 @old_offset_power = @hit_offset_power
               end
 
@@ -356,11 +370,11 @@ module Pingpong
               if dirX != @last_dirX
                 if dirX > 0
                   #@log.write "Info: Direction changed, now going towards enemy" if $DEBUG
-                  if not @max_velocity.nil?
-                    if @max_velocity > 0.3
-                      @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
-                    end
-                  end
+                  #if not @max_velocity.nil?
+                  #  if @max_velocity > 0.3
+                  #    @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
+                  #  end
+                  #end
                   @last_exit_angle = @math.calculate_line_angle( x3, y3, x2, y2 )
                   @log.write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
                   # check deviation from normal bounce angle
@@ -687,6 +701,10 @@ module Pingpong
 
     def join_message(player_name)
       %Q!{"msgType":"join","data":"#{player_name}"}!
+    end
+
+    def duel_message(player_name, other_name)
+      %Q!{"msgType":"requestDuel","data":["#{player_name}","#{other_name}"]}!
     end
 
     def movement_message(delta)
