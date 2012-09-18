@@ -144,10 +144,10 @@ module Helpers
 
     def angle_to_hit_offset_power a
       a = (a - 90).abs # rotate to ccw 90 degrees and get difference from zero angle
-      a -= 25 # no reduction if angle is lower or equal to 25
-      # cap angle to 30 max
+      a -= 20 # no reduction if angle is lower or equal to 20
+      # cap angle to 45 max
       a = 0 if a < 0
-      a = 30 if a > 30
+      a = 45 if a > 45
       return( 1.0 - (Float(a) / 100) )
     end
 

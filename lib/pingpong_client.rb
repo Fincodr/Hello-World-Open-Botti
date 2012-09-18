@@ -48,11 +48,12 @@ module Pingpong
       @log.write "   |    ___|  ||     |  __|  _  |  _  ||   _|"
       @log.write "   |___|   |__||__|__|____|_____|_____||__|  "
       @log.write ""
-      @log.write "   H e l l o W o r l d O p e n   B o t  v0.7"
+      @log.write "   H e l l o W o r l d O p e n   B o t  v0.8"
       @log.write ""
       @log.write "      Coded by Fincodr aka Mika Luoma-aho"
       @log.write "      Send job offers to <fincodr@mxl.fi>"
       @log.write ""
+      $stdout.flush
 
       # log initialize parameters
       @log.write "initialize(#{player_name}, #{server_host}, #{server_port})"
@@ -92,6 +93,8 @@ module Pingpong
       @local_time = get_localtimestamp
       @local_time_elapsed = 0
       @local_time_delta = 0
+      @local_vs_server_delta = nil
+      @local_vs_server_drift = 0
 
       # last updated timestamps
       @updatedLastTimestamp = 0
@@ -100,13 +103,14 @@ module Pingpong
 
       # AI settings
       @AI_level = -1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
-      @paddle_safe_margin = 5
+      @paddle_safe_margin = 6
       @paddle_slowdown_margin = 25
       @paddle_slowdown_power = 0
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
       @max_paddle_speed = 1.0
       @last_sent_changedir = -99.0
       @max_iterations = 10
+      @last_enemy_enter_angle = 0
       @last_enter_angle = 0
       @last_exit_angle = 0
       @last_dirX = 0
@@ -153,7 +157,7 @@ module Pingpong
 
           when 'joined'
             @log.write "< joined: #{json}"
-            Launchy.open(message['data'])
+            #Launchy.open(message['data'])
 
           when 'gameStarted'
             @log.write "< gameStarted: #{json}"
@@ -164,7 +168,7 @@ module Pingpong
             @local_time = get_localtimestamp
 
             if $DEBUG
-              @log.write "< gameIsOn: #{json}"
+              @log.write "< gameIsOn: lag:#{@local_vs_server_drift} #{json}"
             end
             msg = message['data']
 
@@ -177,6 +181,11 @@ module Pingpong
               @server_time_elapsed += @server_time_delta
             end
 
+            # update local vs server delta (onetime)
+            if @local_vs_server_delta.nil?
+              @local_vs_server_delta = @local_time - @server_time
+            end
+
             # update fixed server time
             @fixed_server_time_delta = @fixed_server_rate
             if @fixed_server_time.nil?
@@ -186,7 +195,8 @@ module Pingpong
             end
 
             # debug output to compare server and fixed timesteps
-            #@log.debug "S: #{@server_time} F: #{@fixed_server_time} D: #{@fixed_server_time-@server_time}"
+            #@log.debug "S: #{@server_time} L: #{@local_time} D: #{(@local_time-@server_time)-@local_vs_server_delta}"
+            @local_vs_server_drift = (@local_time-@server_time)-@local_vs_server_delta
 
             # update ball information from json packet
             begin
@@ -306,9 +316,26 @@ module Pingpong
                 # safe angles are -25 .. +25 and anything over that should decrement the power
                 angle_hit_offset_power = @math.angle_to_hit_offset_power @last_enter_angle
                 @hit_offset_power *= angle_hit_offset_power
+
+                # scale hit_offset depenging on the current paddle location
+                # so that when we are near the edges we are using less power to
+                # change the trajectory (safe zone is paddleHeight area)
+                if @AI_level > 0.0
+                  begin
+                    location_hit_offset_power = 1.0 - (((@ownPaddle.y - @config.arenaHeight/2).abs - @config.paddleHeight) / (@config.arenaHeight/2 - @config.paddleHeight))
+                    location_hit_offset_power = 1.0 if location_hit_offset_power > 1.0
+                  rescue
+                    location_hit_offset_power = 1.0
+                  end
+                  #@hit_offset_power *= location_hit_offset_power
+                  #@log.debug "Location hit offset power in effect at #{location_hit_offset_power}"
+                end
+
               else
+
                 @paddle_slowdown_power = 1.0
                 @hit_offset_power = 1.0
+
               end                
 
               if @hit_offset_power != @old_offset_power
@@ -403,7 +430,7 @@ module Pingpong
                       end
                     end
                     @ownPaddle.set_target(y1 + @hit_offset)
-                    @log.write "Info: Own enter angle = #{@last_enter_angle}" if $DEBUG
+                    @log.write "Info: < Enter angle = #{@last_enter_angle}, PadY: #{@ownPaddle.y}, WantedY: #{@ownPaddle.target_y} (Offset:#{@hit_offset})" if $DEBUG
                     break
                   end
 
@@ -490,7 +517,8 @@ module Pingpong
                     @enemyPaddle.set_target(y1)
 
                     # calculate current angle
-                    #@last_enter_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
+                    @last_enemy_enter_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
+
                     #@log.write "Info: Enemy enter angle = #{@last_enter_angle}" if $DEBUG
                     #
                     # TODO:
@@ -603,11 +631,11 @@ module Pingpong
 
               # Quickly move to the ball direction if the ball is
               # very close
-              if distance_to_player < 25 && @last_dirX < 0 && is_at_border == false
-                #@log.debug "Trying to speedup at the end."
-                speed = 1.0
-                delta = -last_deltaY * @AI_level
-              end
+              #if distance_to_player < 25 && @last_dirX < 0 && is_at_border == false
+              #  #@log.debug "Trying to speedup at the end."
+              #  speed = 1.0
+              #  delta = -last_deltaY * @AI_level
+              #end
 
               if delta < 0
                 @log.write "> changeDir(#{speed})" if $DEBUG
@@ -626,8 +654,19 @@ module Pingpong
             winner = message['data']
             if winner == @player_name
               @win_count += 1
+              @log.write "--WINNER--"
+              @log.write "Opponent enter angle was #{@last_enemy_enter_angle}"
+              @log.write "Opponent paddle was last at #{@enemyPaddle.y} [#{@enemyPaddle.y-@config.paddleHeight/2}..#{@enemyPaddle.y+@config.paddleHeight/2}]"
+              @log.write "Opponent paddle was going to #{@enemyPaddle.target_y} [#{@enemyPaddle.target_y-@config.paddleHeight/2}..#{@enemyPaddle.target_y+@config.paddleHeight/2}]"
+              @log.write "Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
             else
               @lose_count += 1
+              @log.write "--LOSER--"
+              @log.write "Own enter angle was #{@last_enemy_enter_angle}"
+              @log.write "Own paddle was last at #{@ownPaddle.y} [#{@ownPaddle.y-@config.paddleHeight/2}..#{@ownPaddle.y+@config.paddleHeight/2}]"
+              @log.write "Own paddle was going to #{@ownPaddle.target_y} [#{@ownPaddle.target_y-@config.paddleHeight/2}..#{@ownPaddle.target_y+@config.paddleHeight/2}]"
+              @log.write "Own paddle hit offset was at #{@hit_offset} with power of #{@hit_offset_power}"
+              @log.write "Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
             end
             @log.write "< gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}"
             @log.debug "gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}" if $DEBUG
@@ -638,7 +677,7 @@ module Pingpong
             end
             @scores.each {|key, value| @log.write "Info: Scores: #{key}: #{value}" }
             reset_round
-
+            $stdout.flush
           else
             # unknown message received
             @log.write "< unknown_message: #{json}" if $DEBUG
