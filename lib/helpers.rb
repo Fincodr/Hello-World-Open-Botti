@@ -95,19 +95,29 @@ module Helpers
       @y3 = nil
     end
     def set_position(x, y)
-      @x3 = @x2
-      @y3 = @y2
-      @x2 = @x
-      @y2 = @y
+      if @x2.nil?
+        @x3 = nil
+        @y3 = nil
+      else
+        @x3 = @x2
+        @y3 = @y2
+      end
+      if @x.nil?
+        @x2 = nil
+        @y2 = nil
+      else
+        @x2 = @x
+        @y2 = @y
+      end
       @x = x
       @y = y
     end
-    attr_reader :x
-    attr_reader :y
-    attr_reader :x2
-    attr_reader :y2
-    attr_reader :x3
-    attr_reader :y3
+    attr_accessor :x
+    attr_accessor :y
+    attr_accessor :x2
+    attr_accessor :y2
+    attr_accessor :x3
+    attr_accessor :y3
   end # /Ball
 
   class Paddle
@@ -119,8 +129,8 @@ module Helpers
       @y = y
     end
     def reset
-      @x = 0
-      @y = 0
+      @x = nil
+      @y = nil
       @target_y = nil
       @avg_target_y = nil
     end    
@@ -144,11 +154,15 @@ module Helpers
 
     def angle_to_hit_offset_power a
       a = (a - 90).abs # rotate to ccw 90 degrees and get difference from zero angle
-      a -= 10 # no reduction if angle is lower or equal to 10
-      # cap angle to 45 max
+      a -= 15 # no reduction if angle is lower or equal to 15
+      # cap angle to 0 to 35
       a = 0 if a < 0
       a = 50 if a > 50
-      return( 1.0 - (Float(a) / 50) )
+      if a > 25
+        return( -(Float(a-25) / 50) )
+      else
+        return( 1.0 - (Float(a) / 50) )
+      end
     end
 
     def is_close_to( a, b, diff = 0.001 )
@@ -157,8 +171,7 @@ module Helpers
     end
 
     def calculate_collision(y1, x2, y2, x3, y3)
-      x1 = x3 - ((x2 - x3) / (y2 - y3)) * (y3 - y1)
-      return x1
+      return (x3 - ((x2 - x3) / (y2 - y3)) * (y3 - y1))
     end
 
     # create new function to return the correct x1,y1,x2,y2,x3,y3
@@ -168,33 +181,27 @@ module Helpers
     #       the exit angle.
 
     def is_p3_on_the_same_p1p2_line(x1, y1, x2, y2, x3, y3)
+      return false if is_close_to(x2, x1)
+      return false if is_close_to(y2, y1)
       a = Float(x2-x1)
       b = Float(y2-y1)
-      return false if (a == 0 && b != 0) || (b == 0 && a != 0)
       return ((x3-x1)-(a/b)*(y3-y1)).abs<2
     end
 
     def is_p1_on_the_same_p2p3_line(x1, y1, x2, y2, x3, y3)
+      return false if is_close_to(x2, x3)
+      return false if is_close_to(y2, y3)
       a = Float(x2-x3)
       b = Float(y2-y3)
-      return false if (a == 0 && b != 0) || (b == 0 && a != 0)
       return ((x1-x3)-(a/b)*(y1-y3)).abs<2
     end
 
     def on_the_same_line(x1, y1, x2, y2, x3, y3)
-      begin
-        return true if is_close_to(y1, y2) && is_close_to(y1, y3)
-        return true if is_close_to(x1, x2) && is_close_to(x1, x3)
-        amount = ((x3-x1).abs - ((x2 - x3).abs / (y2 - y3).abs) * (y3 - y1).abs).abs
-        if amount < 1
-          return true
-        else
-          return false
-        end
-      rescue
-        # division by zero
-        return false
-      end
+      return true if is_close_to(y1, y2) && is_close_to(y1, y3)
+      return true if is_close_to(x1, x2) && is_close_to(x1, x3)
+      a = Float(x2-x3)
+      b = Float(y2-y3)
+      return ((x3-x1)-(a/b)*(y3-y1)).abs<2
     end
 
     def radians_to_degree( radians )
