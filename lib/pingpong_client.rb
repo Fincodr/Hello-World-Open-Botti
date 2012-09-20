@@ -29,7 +29,7 @@ require 'fileutils'
 # added libraries
 require 'time'
 require 'date'
-require 'launchy'
+require 'launchy' if $DEBUG
 require 'benchmark' if $DEBUG
 require_relative 'helpers'
 
@@ -139,6 +139,7 @@ module Pingpong
       @wanted_y = 240+25
       @old_wanted_y = @wanted_y
       @passed_wanted_y = false
+      @show_json = true
 
     end
 
@@ -161,10 +162,12 @@ module Pingpong
 
           when 'joined'
             @log.write "< joined: #{json}"
-            Launchy.open(message['data'])
+            $stdout.flush
+            Launchy.open(message['data']) if $DEBUG
 
           when 'gameStarted'
             @log.write "< gameStarted: #{json}"
+            $stdout.flush
 
           when 'gameIsOn'
 
@@ -173,7 +176,13 @@ module Pingpong
 
             if $DEBUG
               @log.write "< gameIsOn: lag:#{@local_vs_server_drift} #{json}"
+            else
+              if @show_json
+                @show_json = false
+                @log.write "< gameIsOn: lag:#{@local_vs_server_drift} #{json}"
+              end
             end
+
             msg = message['data']
 
             # update server time from json packet
@@ -237,6 +246,24 @@ module Pingpong
               @log.write "Warning: Player block missing from json packet"
             end
 
+            if not $DEBUG
+              str = sprintf "L:%d B:%.2f %.2f P:%.2f,%.2f C:%d %d %d %d %d", @local_vs_server_drift, @ball.x, @ball.y, @ownPaddle.y, @enemyPaddle.y, @config.ballRadius, @config.paddleWidth, @config.paddleHeight, @config.arenaWidth, @config.arenaHeight
+              #@local_vs_server_drift} Ball:#{Integer(@ball.x)},#{Integer(@ball.y)},#{@config.ballRadius} Paddles:#{Integer(@ownPaddle.y)},#{Integer(@enemyPaddle.y)},#{@config.paddleWidth},#{@config.paddleHeight} Arena:#{@config.arenaWidth},#{@config.arenaHeight}
+              @log.write "< gameIsOn: #{str}"
+            end
+
+            #----------------------------------------------
+            #
+            # =======================================
+            # Simulate world forward to compensate for
+            # current lag reading
+            # =======================================
+            #
+            # Take the best lag average 
+            #
+            #----------------------------------------------
+
+
             ###############################################
             #
             # Simulation code start
@@ -267,8 +294,9 @@ module Pingpong
               # Case #1 - All points are on the same line
               if @math.on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
 
-                #@log.write "COLLISION CASE #0: No collision, all points are on the same line"
-                # all points are on the same line
+                # ============================================================
+                # No collision detected, all three points are on the same line
+                # ============================================================
                 @last_bounce_state = 0
 
               else
@@ -283,11 +311,17 @@ module Pingpong
                 case @last_bounce_state
 
                   when 0
-                    # Case #2 - P1 is not on the same line with P2 and P3
+
+                    # Check if P1 is not on the same line with P2 and P3
                     if not @math.is_p1_on_the_same_p2p3_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+
+                      # ============================================================
+                      # COLLISION CASE #1: P1 is not on the same line as P2 and P3
+                      # ============================================================
                       @last_bounce_state = 1
+
                       @log.write "COLLISION CASE #1: P1 is not on the same line as P2 and P3"
-                      @log.debug "COLLISION CASE #1: P1 is not on the same line as P2 and P3"
+                      #@log.debug "COLLISION CASE #1: P1 is not on the same line as P2 and P3"
                       # find the collision point using the current velocity
                       # Note: Can collide with any surface
                       deltaX = x2-x3
@@ -327,18 +361,20 @@ module Pingpong
 
                     else
                       @last_bounce_state = 0
-                      @log.write "Warning: Unknown collision!"
-                      # we do not know what is the situation
-                      # just send the paddle to the ball-y
-                      #@ownPaddle.set_target( @ball.y )
+                      @log.write "COLLISION CASE #3: Unknown collision state, all points are at the same line!"
                     end
 
                   when 1
-                    # Case #3 - P3 is not on the same line with P1 and P2
+
+                    # Check if P3 is not on the same line with P1 and P2
                     if not @math.is_p3_on_the_same_p1p2_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+
+                      # ==========================================================
+                      # COLLISION CASE #2: P3 is not on the same line as P1 and P2
+                      # ==========================================================
                       @last_bounce_state = 2
+
                       @log.write "COLLISION CASE #2: P3 is not on the same line as P1 and P2"
-                      @log.debug "COLLISION CASE #2: P3 is not on the same line as P1 and P2"
                       # the last known point is not on the new line
                       # so we can just use the current point and
                       # previous position for velocity and heading
@@ -348,15 +384,12 @@ module Pingpong
 
                     else
                       @last_bounce_state = 0
-                      @log.write "Warning: Unknown collision!"
-                      # we do not know what is the situation
-                      # just send the paddle to the ball-y
-                      #@ownPaddle.set_target( @ball.y )
+                      @log.write "COLLISION CASE #3: Unknown collision state, all points are at the same line!"
                     end
 
                 end #/ case
 
-              end #/ on_the_same_line            else
+              end #/ on_the_same_line
 
             end #/ if ball.x2 and x3 are not nill
 
@@ -388,12 +421,32 @@ module Pingpong
                 else
                   @max_velocity = @last_avg_velocity
                 end
-                @log.debug "#{@last_velocity} + #{velocity} / 2 = #{@last_avg_velocity} (max = #{@max_velocity})"
+                #@log.debug "#{@last_velocity} + #{velocity} / 2 = #{@last_avg_velocity} (max = #{@max_velocity})"
               else
                 @last_avg_velocity = nil
               end
               @last_velocity = velocity
             end
+
+            #----------------------------------------------
+            #
+            # =======================================
+            # Calculate where we should aim next ball
+            # =======================================
+            #
+            # To calculate best target of opportunity we
+            # need to simulate different situations that
+            # could happend with different paddle place-
+            # ments.
+            #
+            #----------------------------------------------
+            opponent_best_target = 0
+            if @enemyPaddle.y < @config.arenaHeight / 2
+              opponent_best_target = @config.arenaHeight - 1
+            else
+              opponent_best_target = 0
+            end
+            @log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
 
             #@log.debug "#{@last_velocity}"
 
@@ -483,17 +536,11 @@ module Pingpong
             end                
 
             if @hit_offset_power != @old_offset_power
-              @log.debug "Offset power now at #{@hit_offset_power} (max velocity #{@max_velocity}"
+              #@log.debug "Offset power now at #{@hit_offset_power} (max velocity #{@max_velocity}"
               @old_offset_power = @hit_offset_power
             end
 
             #@log.write "Info: Server time delta = #{@server_time_delta} (fixed rate = #{@fixed_server_rate}" if $DEBUG
-
-
-
-            #----------------------------------------------
-            #
-            
 
             #----------------------------------------------
             #
@@ -797,12 +844,15 @@ module Pingpong
               if delta < 0
                 @log.write "> changeDir(#{speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
                 tcp.puts movement_message(speed)
+
               elsif delta > 0
                 @log.write "> changeDir(#{-speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
                 tcp.puts movement_message(-speed)
+
               else
                 @log.write "> changeDir(0) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
                 tcp.puts movement_message(0)
+
               end
 
             end # /if
@@ -811,28 +861,31 @@ module Pingpong
             winner = message['data']
             if winner == @player_name
               @win_count += 1
-              @log.write "--WINNER--"
-              @log.write "Opponent enter angle was #{@last_enemy_enter_angle}"
-              @log.write "Opponent paddle was last at #{@enemyPaddle.y} [#{@enemyPaddle.y-@config.paddleHeight/2}..#{@enemyPaddle.y+@config.paddleHeight/2}]"
-              @log.write "Opponent paddle was going to #{@enemyPaddle.target_y} [#{@enemyPaddle.target_y-@config.paddleHeight/2}..#{@enemyPaddle.target_y+@config.paddleHeight/2}]"
-              @log.write "Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
             else
               @lose_count += 1
-              @log.write "--LOSER--"
-              @log.write "Own enter angle was #{@last_enemy_enter_angle}"
-              @log.write "Own paddle was last at #{@ownPaddle.y} [#{@ownPaddle.y-@config.paddleHeight/2}..#{@ownPaddle.y+@config.paddleHeight/2}]"
-              @log.write "Own paddle was going to #{@ownPaddle.target_y} [#{@ownPaddle.target_y-@config.paddleHeight/2}..#{@ownPaddle.target_y+@config.paddleHeight/2}]"
-              @log.write "Own paddle hit offset was at #{@hit_offset} with power of #{@hit_offset_power}"
-              @log.write "Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
             end
             @log.write "< gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}"
             @log.debug "gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}" if $DEBUG
+            if winner == @player_name
+              @log.write "Info: --WINNER--"
+              @log.write "Info: Opponent enter angle was #{@last_enemy_enter_angle}"
+              @log.write "Info: Opponent paddle was last at #{@enemyPaddle.y} [#{@enemyPaddle.y-@config.paddleHeight/2}..#{@enemyPaddle.y+@config.paddleHeight/2}]"
+              @log.write "Info: Opponent paddle was going to #{@enemyPaddle.target_y} [#{@enemyPaddle.target_y-@config.paddleHeight/2}..#{@enemyPaddle.target_y+@config.paddleHeight/2}]"
+              @log.write "Info: Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
+            else
+              @log.write "Info: --LOSER--"
+              @log.write "Info: Own enter angle was #{@last_enemy_enter_angle}"
+              @log.write "Info: Own paddle was last at #{@ownPaddle.y} [#{@ownPaddle.y-@config.paddleHeight/2}..#{@ownPaddle.y+@config.paddleHeight/2}]"
+              @log.write "Info: Own paddle was going to #{@ownPaddle.target_y} [#{@ownPaddle.target_y-@config.paddleHeight/2}..#{@ownPaddle.target_y+@config.paddleHeight/2}]"
+              @log.write "Info: Own paddle hit offset was at #{@hit_offset} with power of #{@hit_offset_power}"
+              @log.write "Info: Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
+            end
             if @scores.has_key?(winner)
               @scores[winner]+=1 # increment score for specified playername
             else
               @scores[winner]=1
             end
-            @scores.each {|key, value| @log.write "Info: Scores: #{key}: #{value}" }
+            @scores.each {|key, value| @log.write "Info: Score: #{key}: #{value}" }
             reset_round
             $stdout.flush
           else

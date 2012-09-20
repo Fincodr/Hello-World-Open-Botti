@@ -21,8 +21,8 @@
 # 3. This notice may not be removed or altered from any distribution.
 # 4. Contact author if you need special licensing or usage terms.
 #
-require 'rubygems'
-require 'bundler/setup'
+#require 'rubygems'
+#require 'bundler/setup'
 require_relative 'pingpong_client'
 
 player_name = ARGV[0]

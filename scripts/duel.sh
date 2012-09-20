@@ -3,12 +3,13 @@
 playername=$1
 host=$2
 port=$3
-pidfile=.tmp/client.pid
+othername=$4
+pidfile=.tmp/client_$1.pid
 
 if [ -z $port ]; then
-  echo "Usage: `basename $0` <playername> <serverhost> <serverport>"
+  echo "Usage: `basename $0` <playername> <serverhost> <serverport> <othername>"
   echo ""
-  echo "Starts a Pingpong Ruby client against a server"
+  echo "Starts a Pingpong Ruby client against a server (or othername player)"
   exit 1
 fi
 
@@ -27,11 +28,9 @@ function exit_if_running() {
 }
 
 function start_client() {
-  mkdir log 2>/dev/null
-  logfile=log/client.log
-  echo `date` >>$logfile
-  (ruby lib/start.rb $playername $host $port &>>$logfile) & echo $! > $pidfile
+  logfile=client.log
   echo "Logging into $logfile"
+  (ruby lib/start.rb $playername $host $port $othername &>$logfile) & echo $! > $pidfile
 }
 
 ensure_pid_file

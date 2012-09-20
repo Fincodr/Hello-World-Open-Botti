@@ -163,7 +163,7 @@ module Helpers
       else
         return( 1.0 - (Float(a) / 50) )
       end
-    end
+    end # /angle_to_hit_offset_power
 
     def is_close_to( a, b, diff = 0.001 )
       return true if ( (a-b).abs < diff )
@@ -186,7 +186,7 @@ module Helpers
       a = Float(x2-x1)
       b = Float(y2-y1)
       return ((x3-x1)-(a/b)*(y3-y1)).abs<2
-    end
+    end # /is_p3_on_the_same_p1p2_line
 
     def is_p1_on_the_same_p2p3_line(x1, y1, x2, y2, x3, y3)
       return false if is_close_to(x2, x3)
@@ -194,19 +194,21 @@ module Helpers
       a = Float(x2-x3)
       b = Float(y2-y3)
       return ((x1-x3)-(a/b)*(y1-y3)).abs<2
-    end
+    end # /is_p1_on_the_same_p2p3_line
 
     def on_the_same_line(x1, y1, x2, y2, x3, y3)
       return true if is_close_to(y1, y2) && is_close_to(y1, y3)
       return true if is_close_to(x1, x2) && is_close_to(x1, x3)
+      return false if is_close_to(x2, x3)
+      return false if is_close_to(y2, y3)
       a = Float(x2-x3)
       b = Float(y2-y3)
       return ((x3-x1)-(a/b)*(y3-y1)).abs<2
-    end
+    end # /on_the_same_line
 
     def radians_to_degree( radians )
       return radians * 180 / ::Math::PI
-    end #/ radians_to_degree
+    end # /radians_to_degree
 
     def calculate_line_angle( x1, y1, x2, y2 )
       angle = radians_to_degree( ::Math.atan((x2-x1)/(y2-y1)) )
@@ -224,8 +226,8 @@ module Helpers
         end
       end
       return angle
-    end
+    end # /calculate_line_angle
 
   end
 
-end # /module
+end #/ module
