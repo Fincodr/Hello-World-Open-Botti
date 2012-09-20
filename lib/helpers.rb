@@ -46,6 +46,17 @@ module Helpers
 
   end
 
+  class SolveResult
+    def initialize x, y, dx, dy, distance, iterations
+      @distance = distance
+      @iterations = iterations
+      @point = Vector2.new x, y, dx, dy
+    end
+    attr_accessor :distance
+    attr_accessor :iterations
+    attr_accessor :point
+  end
+
   class Configuration
     def initialize
       @arenaWidth = nil
@@ -71,6 +82,53 @@ module Helpers
     attr_reader :paddleHeight
     attr_reader :ballRadius
   end # /Configuration
+
+  class Vector2
+    def initialize x, y, dx, dy
+      @x = x
+      @y = y
+      @dx = dx
+      @dy = dy
+    end
+    def set_position x, y
+      @x = x
+      @y = y
+    end
+    def set_velocity dx, dy
+      @dx = x
+      @dy = y
+    end
+    def scale sz
+      @dx *= sz
+      @dy *= sz
+    end
+    def normalize
+      power = Math.hypot( dx, dy )
+      @dx *= power
+      @dy *= power
+    end
+    attr_accessor :x
+    attr_accessor :y
+    attr_accessor :dx
+    attr_accessor :dy
+  end # /Vector2
+
+  class Point
+    def initialize x, y
+      @x = x
+      @y = y
+    end
+    def set_position x, y
+      @x = x
+      @y = y
+    end
+    def reset
+      @x = nil
+      @y = nil
+    end
+    attr_reader :x
+    attr_reader :y
+  end # /Point
 
   ###############################################
   #
@@ -151,6 +209,60 @@ module Helpers
   end # /class
 
   class Math
+
+    # Solves collisions from p1 point (Vector2) and returns
+    # a new point of the resulting vector
+    def solve_collisions x1, y1, x2, y2, config, max_iterations
+      # loop while we are simulating
+      iterations = 0
+      distance = 0
+      while iterations < max_iterations
+        deltaX = x1-x2
+        deltaY = y1-y2
+
+        # check the ball y-velocity and set the collision
+        # check line y-coordinate
+        if deltaY < 0
+          y = config.ballRadius
+        else
+          y = config.arenaHeight - config.ballRadius - 1
+        end
+
+        # calculate what x-coordinate the ball is going to hit
+        x = calculate_collision y, x1, y1, x2, y2
+
+        # ball is going to hit the left side
+        if x <= config.paddleWidth + config.ballRadius
+          # no collision, calculate direct line
+          x = config.paddleWidth + config.ballRadius
+          y = calculate_collision x, y1, x1, y2, x2
+          # add the travelled path to the distances
+          distance += ::Math.hypot x-x1, y-y1
+          return SolveResult.new x, y, deltaX, deltaY, distance, iterations
+
+        elsif x >= config.arenaWidth - config.paddleWidth - config.ballRadius - 1
+          # no collision, calculate direct line
+          x = config.arenaWidth - config.paddleWidth - config.ballRadius - 1
+          y = calculate_collision x, y1, x1, y2, x2
+          # add the travelled path to the distances
+          distance += ::Math.hypot x-x1, y-y1
+          return SolveResult.new x, y, deltaX, deltaY, distance, iterations
+
+        else
+          # add the travelled path to the distances
+          distance += ::Math.hypot x-x1, y-y1
+          # bounce and continue simulating
+          x2 = x - deltaX
+          y2 = y + deltaY
+          x1 = x
+          y1 = y
+          # increment iteration count
+          iterations+=1
+        end #/if        
+
+      end # /while
+    end # /solve_collisions
+
 
     def angle_to_hit_offset_power a
       a = (a - 90).abs # rotate to ccw 90 degrees and get difference from zero angle

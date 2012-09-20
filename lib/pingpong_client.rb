@@ -101,7 +101,7 @@ module Pingpong
       # AI settings
       @last_bounce_state = 0 # 0 = no collision, collision 1st, collision 2nd
       @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
-      @paddle_safe_margin = 6
+      @paddle_safe_margin = 5
       @paddle_slowdown_margin = 25
       @paddle_slowdown_power = 1.0
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
@@ -256,10 +256,10 @@ module Pingpong
             #
             # =======================================
             # Simulate world forward to compensate for
-            # current lag reading
+            # current lag (?) no noticeable lag at competition?
             # =======================================
             #
-            # Take the best lag average 
+            # TODO ?
             #
             #----------------------------------------------
 
@@ -267,15 +267,6 @@ module Pingpong
             ###############################################
             #
             # Simulation code start
-            #
-            distance_to_player = 0
-            distance_to_enemy = 0
-            time_to_player = 0
-            time_to_enemy = 0
-            last_deltaX = 0
-            last_deltaY = 0
-
-            #----------------------------------------------
             #
             # ====================
             # Check for collisions
@@ -320,7 +311,7 @@ module Pingpong
                       # ============================================================
                       @last_bounce_state = 1
 
-                      @log.write "COLLISION CASE #1: P1 is not on the same line as P2 and P3"
+                      @log.write "Info: COLLISION CASE #1: P1 is not on the same line as P2 and P3"
                       #@log.debug "COLLISION CASE #1: P1 is not on the same line as P2 and P3"
                       # find the collision point using the current velocity
                       # Note: Can collide with any surface
@@ -335,11 +326,11 @@ module Pingpong
                       x = @math.calculate_collision(y, x2, y2, x3, y3)
                       if x <= @config.paddleWidth + @config.ballRadius
                         # collision with left paddle
-                        if rand(2) == 0
-                          @AI_level = -1.0
-                        else
-                          @AI_level = 1.0
-                        end
+                        #if rand(2) == 0
+                        #  @AI_level = -1.0
+                        #else
+                        #  @AI_level = 1.0
+                        #end
                         #x = @config.paddleWidth + @config.ballRadius
                         #y = @math.calculate_collision(x, y2, x2, y3, x3)
                         @ball.x2 = x1 + deltaX
@@ -349,7 +340,6 @@ module Pingpong
                         #x = @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                         #y = @math.calculate_collision(x, y2, x2, y3, x3)
                         @ball.x2 = x1 + deltaX
-                        @ball.y2 = y1 - deltaY
                       else
                         # collision with arena edges
                         @ball.x2 = x1 - deltaX
@@ -361,7 +351,7 @@ module Pingpong
 
                     else
                       @last_bounce_state = 0
-                      @log.write "COLLISION CASE #3: Unknown collision state, all points are at the same line!"
+                      @log.write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!"
                     end
 
                   when 1
@@ -374,7 +364,7 @@ module Pingpong
                       # ==========================================================
                       @last_bounce_state = 2
 
-                      @log.write "COLLISION CASE #2: P3 is not on the same line as P1 and P2"
+                      @log.write "Info: COLLISION CASE #2: P3 is not on the same line as P1 and P2"
                       # the last known point is not on the new line
                       # so we can just use the current point and
                       # previous position for velocity and heading
@@ -384,7 +374,7 @@ module Pingpong
 
                     else
                       @last_bounce_state = 0
-                      @log.write "COLLISION CASE #3: Unknown collision state, all points are at the same line!"
+                      @log.write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!"
                     end
 
                 end #/ case
@@ -446,17 +436,7 @@ module Pingpong
             else
               opponent_best_target = 0
             end
-            @log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
-
-            #@log.debug "#{@last_velocity}"
-
-            #if @max_velocity.nil?
-            #  @max_velocity = @last_velocity
-            #else
-            #  if @last_velocity > @max_velocity
-            #    @max_velocity = @last_velocity
-            #  end
-            #end
+            #@log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
 
             #----------------------------------------------
             #
@@ -507,7 +487,7 @@ module Pingpong
 
               # scale hit_offset depending on the last velocity
               # note: starting velocity is usually about 0.250
-              @hit_offset_power = 1.0 - ( Float(@max_velocity/3) - 0.250 )
+              @hit_offset_power = 1.0 - ( Float(@max_velocity/2) - 0.250 )
               @hit_offset_power = 1.0 if @hit_offset_power > 1.0
               @hit_offset_power = 0.0 if @hit_offset_power < 0.0
 
@@ -603,12 +583,6 @@ module Pingpong
               if dirX != @last_dirX
                 if dirX > 0
                   if not x2.nil?
-                    #@log.write "Info: Direction changed, now going towards enemy" if $DEBUG
-                    #if not @max_velocity.nil?
-                    #  if @max_velocity > 0.3
-                    #    @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
-                    #  end
-                    #end
                     @last_exit_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
                     @log.write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
                     # check deviation from normal bounce angle
@@ -624,159 +598,78 @@ module Pingpong
                 @last_dirX = dirX
               end
 
-              # loop while we are simulating
-              while iterator < @max_iterations
+              # try to solve
+              solve_results = @math.solve_collisions x1, y1, x2, y2, @config, @max_iterations
+              iterations = 0
+              distance_to_player = 0
+              distance_to_enemy = 0
+              p = solve_results.point
 
-                deltaX = x1-x2
-                deltaY = y1-y2
+              if p.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
+                # hit at opponent paddle
+                iterations += solve_results.iterations
+                distance_to_enemy += solve_results.distance
+                distance_to_player += solve_results.distance
 
-                # check the ball y-velocity and set the collision
-                # check line y-coordinate
-                if deltaY < 0
-                  y = @config.ballRadius
-                else
-                  y = @config.arenaHeight - @config.ballRadius - 1
-                end
+                # set the estimated enemy paddle location
+                @enemyPaddle.set_target(p.y)
+                # calculate current angle
+                @last_enemy_enter_angle = @math.calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
 
-                # calculate what x-coordinate the ball is going to hit
-                x = @math.calculate_collision(y, x1, y1, x2, y2)
-
-                # ball is going to hit the left side
-                if x <= @config.paddleWidth + @config.ballRadius
-
-                  # no collision, calculate direct line
-                  x = @config.paddleWidth + @config.ballRadius
-                  y = @math.calculate_collision(x, y1, x1, y2, x2)
-
-                  # add the travelled path to the distances
-                  distance_to_player += Math.hypot( x-x1, y-y1 )
-                  if ( deltaX > 0 )
-                    distance_to_enemy += Math.hypot( x-x1, y-y1 )
-                  end
-
-                  # calculate current angle
-                  @last_enter_angle = @math.calculate_line_angle( x, y, x1, y1 )
-                  # TODO: Should this be enabled? This would set the hit_offset to zero if
-                  #       the ball is going to hit at the paddle area at the edge of the arena
-                  #if y < @config.paddleHeight or y > (@config.arenaHeight - @config.paddleHeight)
-                  #  @hit_offset = 0
-                  #else
-                    temp_AI_level = @AI_level
-                    if @last_enter_angle <= 90
-                      if @AI_level < 0
-                        # we are helping opponent :)
-                        if @last_enter_angle >= 90-15
-                          @deviation_from_straight = ( 90 - @last_enter_angle ) / 15
-                        else
-                          @deviation_from_straight = 1.0
-                        end
-                        temp_AI_level *= @deviation_from_straight
-                      end
-                      @hit_offset = -(@hit_offset_max * @hit_offset_power) * temp_AI_level
-                    else
-                      if @AI_level < 0
-                        # we are helping opponent :)
-                        if @last_enter_angle < 90+15
-                          @deviation_from_straight = ( @last_enter_angle - 90 ) / 15
-                        else
-                          @deviation_from_straight = 1.0
-                        end
-                        temp_AI_level *= @deviation_from_straight
-                      end
-                      @hit_offset = (@hit_offset_max * @hit_offset_power) * temp_AI_level
-                    end
-                  #end
-
-                  @ownPaddle.set_target(y + @hit_offset)
-
-                  #@log.write "Info: Own enter angle = #{@last_enter_angle}" if $DEBUG
-
-                  # break out of the while-loop, no more simulation neccessary
-                  break
-
-                elsif x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
-
-                  # no collision, calculate direct line
-                  x = @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
-                  y = @math.calculate_collision(x, y1, x1, y2, x2)
-
-                  # add the travelled path to the distances
-                  distance_to_player += Math.hypot( x-x1, y-y1 )
-                  if ( deltaX > 0 )
-                    distance_to_enemy += Math.hypot( x-x1, y-y1 )
-                  end
-
-                  # set the estimated enemy paddle location
-                  @enemyPaddle.set_target(y)
-
-                  # calculate current angle
-                  @last_enemy_enter_angle = @math.calculate_line_angle( x1, y1, x, y )
-
-                  #@log.write "Info: Enemy enter angle = #{@last_enter_angle}" if $DEBUG
-                  #
-                  # TODO:
-                  #
-                  #distance_to_paddle = (y1 - @enemyPaddle.y).abs
-                  #
-                  # calculate how many seconds it takes the ball to hit the enemy side
-                  # calculate where enemy is going to be at that time
-                  # get the difference and paddle location
-                  #
-                  #delta = (distance_to_enemy - distance_to_paddle)
-                  #@log.debug "BallHit @ #{y1} (dist=#{distance_to_enemy}px), p-dist=#{distance_to_paddle} #{delta})"
-                  # bounce ball back and continue
-
-                  x2 = x + deltaX
-                  y2 = y - deltaY
-                  x1 = x
-                  y1 = y
-
-                  # increment iteration count
-                  iterator+=1
-
-                  # continue simulation from start
-                  next
-
-                else
-
-                  # add the travelled path to the distances
-                  distance_to_player += Math.hypot( x-x1, y-y1 )
-                  if ( deltaX > 0 )
-                    distance_to_enemy += Math.hypot( x-x1, y-y1 )
-                  end
-
-                  # Set new start position to the collision point (using the same velocity)
-                  x2 = x - deltaX
-                  y2 = y + deltaY
-                  x1 = x
-                  y1 = y
-
-                  # increment iteration count
-                  iterator+=1
-
-                end #/if
-
-              end # /while   
-
-              #@log.debug "Iterations = #{iterator}"
-
-              if iterator == @max_iterations
-                # ok, it was too much work, we should just go to middle
-                @ownPaddle.set_target( @config.arenaHeight / 2 )
+                # bounce back and simulate again
+                x2 = p.x + p.dx
+                y2 = p.y - p.dy
+                x1 = p.x
+                y1 = p.y
+                solve_results = @math.solve_collisions x1, y1, x2, y2, @config, @max_iterations
+                p = solve_results.point
               end
 
-            else
+              if p.x <= @config.paddleWidth + @config.ballRadius
+                # hit at our paddle
+                iterations += solve_results.iterations
+                distance_to_player += solve_results.distance
+                @last_enter_angle = @math.calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
+                #@log.debug "< Enter angle = #{@last_enter_angle}"
+                # TODO: Should this be enabled? This would set the hit_offset to zero if
+                #       the ball is going to hit at the paddle area at the edge of the arena
+                #if y < @config.paddleHeight or y > (@config.arenaHeight - @config.paddleHeight)
+                #  @hit_offset = 0
+                #else
+                temp_AI_level = @AI_level
+                if @last_enter_angle <= 90
+                  if @AI_level < 0
+                    # we are helping opponent :)
+                    if @last_enter_angle >= 90-15
+                      @deviation_from_straight = ( 90 - @last_enter_angle ) / 15
+                    else
+                      @deviation_from_straight = 1.0
+                    end
+                    temp_AI_level *= @deviation_from_straight
+                  end
+                  @hit_offset = -(@hit_offset_max * @hit_offset_power) * temp_AI_level
+                else
+                  if @AI_level < 0
+                    # we are helping opponent :)
+                    if @last_enter_angle < 90+15
+                      @deviation_from_straight = ( @last_enter_angle - 90 ) / 15
+                    else
+                      @deviation_from_straight = 1.0
+                    end
+                    temp_AI_level *= @deviation_from_straight
+                  end
+                  @hit_offset = (@hit_offset_max * @hit_offset_power) * temp_AI_level
+                end
+                @ownPaddle.set_target(p.y + @hit_offset)                
 
-              # no previous ball location known so we do not
-              # know ball velocity and can't simulate the
-              # ball path at all.
-              # So we can only set the paddle target location to
-              # the center of the arena
-              #@ownPaddle.set_target( @config.arenaHeight / 2 )
+              else
+                # ok, it was too much work, we should just go to middle and wait
+                @ownPaddle.set_target( @config.arenaHeight / 2 )
+                @log.debug "Bounces #{iterations} over max!" 
+                #Distance to Player: #{distance_to_player}, Opp: #{distance_to_enemy}"
+              end
 
             end
-
-            #@log.debug "Distance to player: #{distance_to_player}, opponent: #{distance_to_enemy}"
             #
             # Simulation code end
             #
