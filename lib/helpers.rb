@@ -7,19 +7,25 @@
 #
 # Copyright (c) 2012 Mika Luoma-aho <fincodr@mxl.fi>
 #
-# This source code and software is provided 'as-is', without any express or implied warranty.
-# In no event will the authors be held liable for any damages arising from the use of this source code or software.
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
 #
-# Permission is granted to HelloWorldOpen organization to use this software and sourcecode as part of the
-# HelloWorldOpen competition as explained in the HelloWorldOpen competition rules.
+#       http://www.apache.org/licenses/LICENSE-2.0
 #
-# You are however subject to the following restrictions:
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+# Additionally you are subject to the following restrictions:
 #
 # 1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software.
 #    If you use this software's source code in a product, an acknowledgment in the documentation will be required.
 # 2. Altered versions must be plainly marked as such, and must not be misrepresented as being the original software.
 # 3. This notice may not be removed or altered from any distribution.
-# 4. Contact author if you need special license terms.
+# 4. Contact author if you need special licensing or usage terms.
 #
 module Helpers
 
@@ -272,15 +278,11 @@ module Helpers
 
     def angle_to_hit_offset_power a
       a = (a - 90).abs # rotate to ccw 90 degrees and get difference from zero angle
-      a -= 15 # no reduction if angle is lower or equal to 15
+      a -= 20 # no reduction if angle is lower or equal to 20
       # cap angle to 0 to 35
       a = 0 if a < 0
-      a = 50 if a > 50
-      if a > 25
-        return( -(Float(a-25) / 50) )
-      else
-        return( 1.0 - (Float(a) / 50) )
-      end
+      a = 55 if a > 55
+      return( 1.0 - (Float(a) / 90) )
     end # /angle_to_hit_offset_power
 
     def is_close_to( a, b, diff = 0.001 )

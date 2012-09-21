@@ -7,13 +7,19 @@
 #
 # Copyright (c) 2012 Mika Luoma-aho <fincodr@mxl.fi>
 #
-# This source code and software is provided 'as-is', without any express or implied warranty.
-# In no event will the authors be held liable for any damages arising from the use of this source code or software.
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
 #
-# Permission is granted to HelloWorldOpen organization to use this software and sourcecode as part of the
-# HelloWorldOpen competition as explained in the HelloWorldOpen competition rules.
+#       http://www.apache.org/licenses/LICENSE-2.0
 #
-# You are however subject to the following restrictions:
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+# Additionally you are subject to the following restrictions:
 #
 # 1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software.
 #    If you use this software's source code in a product, an acknowledgment in the documentation will be required.

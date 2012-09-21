@@ -9,13 +9,19 @@
 #
 # Copyright (c) 2012 Mika Luoma-aho <fincodr@mxl.fi>
 #
-# This source code and software is provided 'as-is', without any express or implied warranty.
-# In no event will the authors be held liable for any damages arising from the use of this source code or software.
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
 #
-# Permission is granted to HelloWorldOpen organization to use this software and sourcecode as part of the
-# HelloWorldOpen competition as explained in the HelloWorldOpen competition rules.
+#       http://www.apache.org/licenses/LICENSE-2.0
 #
-# You are however subject to the following restrictions:
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+# Additionally you are subject to the following restrictions:
 #
 # 1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software.
 #    If you use this software's source code in a product, an acknowledgment in the documentation will be required.
@@ -99,10 +105,11 @@ module Pingpong
       @updateRate = 1000/9.9 # limit send rate to ~9.9 msg/s
 
       # AI settings
-      @last_bounce_state = 0 # 0 = no collision, collision 1st, collision 2nd
       @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
-      @paddle_safe_margin = 5
-      @paddle_slowdown_margin = 25
+      @block_count = 0 # how many times we have blocked thus far
+      @last_bounce_state = 0 # 0 = no collision, collision 1st, collision 2nd
+      @paddle_safe_margin = 4
+      @paddle_slowdown_margin = 20
       @paddle_slowdown_power = 1.0
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
       @max_paddle_speed = 1.0
@@ -436,7 +443,20 @@ module Pingpong
             else
               opponent_best_target = 0
             end
-            #@log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
+            if @AI_level > 0.0
+              #@log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
+              #
+              # Now that we know the best target of opportunity location
+              # we should calculate what is the best way to get to there
+              # since we do not know the secret formula behind the
+              # paddle physics we need to guess it.
+              #
+              # We can however estimate how much we can affect to
+              # the ball velocity using the offsets and from estimations
+              # we can create model for calculating offsets depending
+              # on the wanted target positions
+              #
+            end
 
             #----------------------------------------------
             #
@@ -472,6 +492,10 @@ module Pingpong
             #
             #----------------------------------------------
             if not @max_velocity.nil?
+
+              # TODO: Enable if we should not try to slow down with higher ball speeds
+              #       Note: This seems to be unneccessary.
+              #
               # set the paddle slowdown power depending on the last velocity reading
               #
               # paddle slowdown power is calculated from normal velocity to velocity + 0.5
@@ -484,35 +508,26 @@ module Pingpong
               #@paddle_slowdown_power -= 0.5
               #@paddle_slowdown_power *= 2
               #@log.debug "Paddle slowdown power: #{@paddle_slowdown_power}"
+              #
+              # ---- /TODO
 
               # scale hit_offset depending on the last velocity
-              # note: starting velocity is usually about 0.250
-              @hit_offset_power = 1.0 - ( Float(@max_velocity/2) - 0.250 )
+              # note: starting velocity is usually about 0.300
+              @hit_offset_power = 1.0 - ( Float(@max_velocity/3) - 0.250 )
               @hit_offset_power = 1.0 if @hit_offset_power > 1.0
               @hit_offset_power = 0.0 if @hit_offset_power < 0.0
 
+              # TODO: Enable if ball has too big velocity and calculated
+              #       location is not good enough for catching.
+              #
               # scale hit_offset depending on the estimated enter angle
               # safe angles are -25 .. +25 and anything over that should decrement the power
               angle_hit_offset_power = @math.angle_to_hit_offset_power @last_enter_angle
-              #@log.debug "Last enter angle: #{@last_enter_angle} = #{angle_hit_offset_power}"
               @hit_offset_power *= angle_hit_offset_power
+              #@log.debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
+              #
+              # ---- /TODO
 
-              # scale hit_offset depenging on the current paddle location
-              # so that when we are near the edges we are using less power to
-              # change the trajectory (safe zone is paddleHeight area)
-              #if @AI_level > 0.0
-              #  begin
-              #    location_hit_offset_power = 1.0 - (((@ownPaddle.y - @config.arenaHeight/2).abs - @config.paddleHeight) / (@config.arenaHeight/2 - @config.paddleHeight))
-              #    location_hit_offset_power = 1.0 if location_hit_offset_power > 1.0
-              #  rescue
-              #    location_hit_offset_power = 1.0
-              #  end
-              #  @hit_offset_power *= location_hit_offset_power
-              #  #@log.debug "Location hit offset power in effect at #{location_hit_offset_power}"
-              #end
-            #else
-            #  @paddle_slowdown_power = 1.0
-            #  @hit_offset_power = 1.0
             end                
 
             if @hit_offset_power != @old_offset_power
@@ -583,6 +598,7 @@ module Pingpong
               if dirX != @last_dirX
                 if dirX > 0
                   if not x2.nil?
+                    @block_count += 1
                     @last_exit_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
                     @log.write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
                     # check deviation from normal bounce angle
@@ -637,29 +653,54 @@ module Pingpong
                 #  @hit_offset = 0
                 #else
                 temp_AI_level = @AI_level
-                if @last_enter_angle <= 90
-                  if @AI_level < 0
-                    # we are helping opponent :)
+
+                if @AI_level < 0
+                  # we are trying to help the opponent :)
+                  if @last_enter_angle <= 90
                     if @last_enter_angle >= 90-15
                       @deviation_from_straight = ( 90 - @last_enter_angle ) / 15
                     else
                       @deviation_from_straight = 1.0
                     end
                     temp_AI_level *= @deviation_from_straight
-                  end
-                  @hit_offset = -(@hit_offset_max * @hit_offset_power) * temp_AI_level
-                else
-                  if @AI_level < 0
-                    # we are helping opponent :)
+                  else
                     if @last_enter_angle < 90+15
                       @deviation_from_straight = ( @last_enter_angle - 90 ) / 15
                     else
                       @deviation_from_straight = 1.0
                     end
-                    temp_AI_level *= @deviation_from_straight
+                    temp_AI_level *= -@deviation_from_straight
                   end
                   @hit_offset = (@hit_offset_max * @hit_offset_power) * temp_AI_level
+
+                else
+
+                  #if @block_count % 2 == 0
+
+                  # AI v0.9 - Not accurate but getting there..
+                  if p.dy < 0
+                    # Ball is going up
+                    if opponent_best_target < @config.arenaHeight/2
+                      # We should aim up
+                      @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
+                    else
+                      # We should aim down
+                      @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
+                    end
+                  else                    
+                    # Ball is going down
+                    if opponent_best_target < @config.arenaHeight/2
+                      # We should aim up
+                      @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
+                    else
+                      # We should aim down
+                      @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
+                    end
+                  end
+
                 end
+
+
                 @ownPaddle.set_target(p.y + @hit_offset)                
 
               else
