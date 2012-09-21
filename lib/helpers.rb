@@ -214,6 +214,8 @@ module Helpers
     # a new point of the resulting vector
     def solve_collisions x1, y1, x2, y2, config, max_iterations
       # loop while we are simulating
+      x = 0
+      y = 0
       iterations = 0
       distance = 0
       while iterations < max_iterations
@@ -261,6 +263,10 @@ module Helpers
         end #/if        
 
       end # /while
+
+      # can't solve, return last position
+      return SolveResult.new x, y, deltaX, deltaY, distance, iterations
+
     end # /solve_collisions
 
 

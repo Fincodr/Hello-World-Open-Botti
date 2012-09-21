@@ -28,7 +28,8 @@ function exit_if_running() {
 }
 
 function start_client() {
-  logfile=client.log
+  mkdir log 2>/dev/null 
+  logfile=log/client.log
   (ruby -d lib/start.rb $playername $host $port $othername >$logfile) & echo $! > $pidfile
   echo "Logging into $logfile"
 }

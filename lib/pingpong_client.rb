@@ -664,6 +664,7 @@ module Pingpong
 
               else
                 # ok, it was too much work, we should just go to middle and wait
+                iterations += solve_results.iterations
                 @ownPaddle.set_target( @config.arenaHeight / 2 )
                 @log.debug "Bounces #{iterations} over max!" 
                 #Distance to Player: #{distance_to_player}, Opp: #{distance_to_enemy}"
