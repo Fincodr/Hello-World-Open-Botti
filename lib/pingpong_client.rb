@@ -696,7 +696,7 @@ module Pingpong
                 @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max)) * @hit_offset_power
                 @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max)) * @hit_offset_power
 
-                #@log.debug "Hit offset power: #{@hit_offset_top_powerlimit},#{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}]"
+                @log.debug "Hit offset power: #{@hit_offset_top_powerlimit},#{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}]"
 
                 #@hit_offset_power *= angle_hit_offset_power
                 #@log.debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
@@ -858,28 +858,28 @@ module Pingpong
 
                   # if we are at the start of the round we are just going to
                   # try to speed up the ball
-                  if @block_count < 2
-                    # AI v0.9 - Not accurate but getting there..
-                    if p.dy < 0
-                      # Ball is going up
-                      #if opponent_best_target < @config.arenaHeight/2
-                        # We should aim up
-                        @hit_offset = (@hit_offset_max * @hit_offset_top_powerlimit) * -@AI_level
-                      #else
-                      #  # We should aim down
-                      #  @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
-                      #end
-                    else                    
-                      # Ball is going down
-                      #if opponent_best_target < @config.arenaHeight/2
-                      #  # We should aim up
-                      #  @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
-                      #else
-                        # We should aim down
-                        @hit_offset = (@hit_offset_max * @hit_offset_bottom_powerlimit) * @AI_level
-                      #end
-                    end
-                  end
+                  #if @block_count < 2
+                  #  # AI v0.9 - Not accurate but getting there..
+                  #  if p.dy < 0
+                  #    # Ball is going up
+                  #    #if opponent_best_target < @config.arenaHeight/2
+                  #      # We should aim up
+                  #      @hit_offset = (@hit_offset_max * @hit_offset_top_powerlimit) * -@AI_level
+                  #    #else
+                  #    #  # We should aim down
+                  #    #  @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
+                  #    #end
+                  #  else                    
+                  #    # Ball is going down
+                  #    #if opponent_best_target < @config.arenaHeight/2
+                  #    #  # We should aim up
+                  #    #  @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
+                  #    #else
+                  #      # We should aim down
+                  #      @hit_offset = (@hit_offset_max * @hit_offset_bottom_powerlimit) * @AI_level
+                  #    #end
+                  #  end
+                  #end
 
                 end
 
