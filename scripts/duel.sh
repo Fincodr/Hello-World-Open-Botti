@@ -4,7 +4,7 @@ playername=$1
 host=$2
 port=$3
 othername=$4
-pidfile=.tmp/client_duel.pid
+pidfile=.tmp/client.pid
 
 if [ -z $port ]; then
   echo "Usage: `basename $0` <playername> <serverhost> <serverport> <othername>"

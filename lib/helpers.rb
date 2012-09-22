@@ -309,11 +309,11 @@ module Helpers
 
     def angle_to_hit_offset_power a
       a = (a - 90).abs # rotate to ccw 90 degrees and get difference from zero angle
-      a -= 30 # no reduction if angle is lower or equal to 30
+      a -= 25 # no reduction if angle is lower or equal to 25
       # cap angle to 0 to 35
       a = 0 if a < 0
       a = 55 if a > 55
-      return( 1.0 - (Float(a) / 90) )
+      return( 1.0 - (Float(a) / 55) )
     end # /angle_to_hit_offset_power
 
     def is_close_to( a, b, diff = 0.001 )

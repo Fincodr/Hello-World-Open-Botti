@@ -8,7 +8,6 @@ if [ -e ".tmp/client.pid" ]; then
   echo "Stopped the client"
 else
   echo "No client running"
-  exit 1
 fi
 
 if [ -e ".tmp/client_duel.pid" ]; then
