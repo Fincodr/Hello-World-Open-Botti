@@ -307,14 +307,26 @@ module Helpers
 
     end # /solve_collisions
 
-    def angle_to_hit_offset_power a
-      a = (a - 90).abs # rotate to ccw 90 degrees and get difference from zero angle
-      a -= 25 # no reduction if angle is lower or equal to 25
-      # cap angle to 0 to 35
-      a = 0 if a < 0
-      a = 55 if a > 55
-      return( 1.0 - (Float(a) / 55) )
-    end # /angle_to_hit_offset_power
+    # We need to limit the usable offset range
+    # for up or down paddle depending on what
+    # angle the ball is going to hit the paddle.
+    #
+    # If the ball is going to hit in <= 90
+    # degree angle we are going to return minus
+    # value that indicates of how many pixels
+    # should be cut from the bottom paddle
+    # offset.
+    # And if the ball is going to hit in >90
+    # degree ange we are going to return plus
+    # value that indicates of how many pixels
+    # should be cut from the top paddle
+    # offset.
+    # The value is calculated using the
+    # second parameter that is usually the
+    # paddle width (10 pixels for example)
+    def angle_to_hit_offset_cut a, b
+      return -(::Math.cos((::Math::PI/180)*a))*b
+    end # /angle_to_hit_offset_cut
 
     def is_close_to( a, b, diff = 0.001 )
       return true if ( (a-b).abs < diff )

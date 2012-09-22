@@ -116,7 +116,7 @@ module Pingpong
       @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
       @block_count = 0 # how many times we have blocked thus far
       @last_bounce_state = 0 # 0 = no collision, collision 1st, collision 2nd
-      @paddle_safe_margin = 4
+      #@paddle_safe_margin = 4
       @paddle_slowdown_margin = 20
       @paddle_slowdown_power = 1.0
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
@@ -242,7 +242,7 @@ module Pingpong
               @config.set_arena( Float(msg_conf['maxWidth']), Float(msg_conf['maxHeight']) )
               @config.set_paddle( Float(msg_conf['paddleWidth']), Float(msg_conf['paddleHeight']) )
               @config.set_ball( Float(msg_conf['ballRadius']) )
-              h = msg_conf['paddleHeight'] / 2 - @paddle_safe_margin # varmuuden vuoksi vielä 1 lisää marginaaliin :)
+              h = msg_conf['paddleHeight'] / 2 # - @paddle_safe_margin # varmuuden vuoksi vielä 1 lisää marginaaliin :)
               if ( h < 5 )
                 h = 0
               end
@@ -491,18 +491,14 @@ module Pingpong
 
               # scale hit_offset depending on the last velocity
               # note: starting velocity is usually about 0.300
-              @hit_offset_power = 1.0 - ( Float(@max_velocity/3) - 0.250 )
-              @hit_offset_power = 1.0 if @hit_offset_power > 1.0
-              @hit_offset_power = 0.0 if @hit_offset_power < 0.0
+              #@hit_offset_power = 1.0 - ( Float(@max_velocity/3) - 0.250 )
+              #@hit_offset_power = 1.0 if @hit_offset_power > 1.0
+              #@hit_offset_power = 0.0 if @hit_offset_power < 0.0
+              @hit_offset_power = 1.0
 
               # TODO: Enable if ball has too big velocity and calculated
               #       location is not good enough for catching.
               #
-              # scale hit_offset depending on the estimated enter angle
-              # safe angles are -25 .. +25 and anything over that should decrement the power
-              angle_hit_offset_power = @math.angle_to_hit_offset_power @last_enter_angle
-              #@hit_offset_power *= angle_hit_offset_power
-              #@log.debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
               #
               # ---- /TODO
 
@@ -656,16 +652,39 @@ module Pingpong
                 distance_to_player += solve_results.distance
                 @last_enter_angle = @math.calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
                 @last_enter_point = p.y
+
                 #@log.debug "< Enter angle = #{@last_enter_angle}"
-                # TODO: Should this be enabled? This would set the hit_offset to zero if
-                #       the ball is going to hit at the paddle area at the edge of the arena
-                #if y < @config.paddleHeight or y > (@config.arenaHeight - @config.paddleHeight)
-                #  @hit_offset = 0
-                #else
+
+                # scale hit_offset depending on the estimated enter angle
+                # safe angles are -25 .. +25 and anything over that should decrement the power
+                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, @config.paddleWidth
+
+                # set the offset top and bottom max values
+                @hit_offset_top = -@hit_offset_max
+                @hit_offset_bottom = @hit_offset_max
+                if offset_cut_value <= 0
+                  # we need to cut the bottom
+                  @hit_offset_bottom += offset_cut_value
+                else
+                  # we need to cut the top
+                  @hit_offset_top += offset_cut_value
+                end
+
+                @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max))
+                @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max))
+
+                #@log.debug "Hit offset power: #{@hit_offset_top_powerlimit},#{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}]"
+
+                #@hit_offset_power *= angle_hit_offset_power
+                #@log.debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
+
                 temp_AI_level = @AI_level
 
                 if @AI_level < 0.0
 
+                  #
+                  # TODO: Fix this to use the new top and bottom offset powerlimits!
+                  #
                   # we are trying to help the opponent :)
                   if @last_enter_angle <= 90
                     if @last_enter_angle >= 90-15
@@ -752,9 +771,9 @@ module Pingpong
                   # + 50%
                   # + 100%
                   #
-                  @start_power = -1.0
+                  @start_power = @hit_offset_top_powerlimit
                   @power_add = 0.05
-                  @max_power = 1.0
+                  @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
                   # Note: We should assume that opponent is going for the estimated position
@@ -765,7 +784,7 @@ module Pingpong
                   while cur_power <= @max_power
 
                     test_vector = exit_vector.dup
-                    test_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
+                    test_offset = -((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
                     test_vector.rotate @math.top_secret_formula test_offset
 
                     # try to solve
@@ -796,9 +815,9 @@ module Pingpong
 
                   # get the first result
                   best_result = sorted_results.first
-                  @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level * best_result[1]["power"]
+                  @hit_offset = -(@hit_offset_max * @hit_offset_power) * @AI_level * best_result[1]["power"]
 
-                  #@log.debug "TARGET >> #{best_result[1]['y']} - #{@hit_offset}"
+                  #@log.debug "TARGET >> #{best_result[1]['y']} - #{best_result[1]["power"]}"
 
                   # AI v0.9 - Not accurate but getting there..
                   #if p.dy < 0
