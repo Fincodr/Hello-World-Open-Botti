@@ -71,6 +71,11 @@ module Pingpong
       @win_count = 0
       @lose_count = 0
 
+      # testmode settings
+      @test_offset_cur = -1.0
+      @test_offset_add = 0.05
+      @test_in_progress = false
+
       reset_round
 
       # open socket to server
@@ -104,6 +109,9 @@ module Pingpong
       @updatedDeltaTime = 0
       @updateRate = 1000/9.9 # limit send rate to ~9.9 msg/s
 
+      # testmode settings
+      @test_mode = 0 # 0 = off, 1 = test different offset powers
+
       # AI settings
       @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
       @block_count = 0 # how many times we have blocked thus far
@@ -114,10 +122,11 @@ module Pingpong
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
       @max_paddle_speed = 1.0
       @last_sent_changedir = -99.0
-      @max_iterations = 10
+      @max_iterations = 15 # should be enough
       @last_enemy_enter_angle = 0
       @last_enter_angle = 0
       @last_exit_angle = 0
+      @last_enter_point = 0
       @last_dirX = 0
       @last_deviation = 0
       @hit_offset = 0
@@ -254,9 +263,11 @@ module Pingpong
             end
 
             if not $DEBUG
-              str = sprintf "L:%d B:%.2f %.2f P:%.2f,%.2f C:%d %d %d %d %d", @local_vs_server_drift, @ball.x, @ball.y, @ownPaddle.y, @enemyPaddle.y, @config.ballRadius, @config.paddleWidth, @config.paddleHeight, @config.arenaWidth, @config.arenaHeight
-              #@local_vs_server_drift} Ball:#{Integer(@ball.x)},#{Integer(@ball.y)},#{@config.ballRadius} Paddles:#{Integer(@ownPaddle.y)},#{Integer(@enemyPaddle.y)},#{@config.paddleWidth},#{@config.paddleHeight} Arena:#{@config.arenaWidth},#{@config.arenaHeight}
-              @log.write "< gameIsOn: #{str}"
+              if @test_mode == 0
+                str = sprintf "L:%d B:%.2f %.2f P:%.2f,%.2f C:%d %d %d %d %d", @local_vs_server_drift, @ball.x, @ball.y, @ownPaddle.y, @enemyPaddle.y, @config.ballRadius, @config.paddleWidth, @config.paddleHeight, @config.arenaWidth, @config.arenaHeight
+                #@local_vs_server_drift} Ball:#{Integer(@ball.x)},#{Integer(@ball.y)},#{@config.ballRadius} Paddles:#{Integer(@ownPaddle.y)},#{Integer(@enemyPaddle.y)},#{@config.paddleWidth},#{@config.paddleHeight} Arena:#{@config.arenaWidth},#{@config.arenaHeight}
+                @log.write "< gameIsOn: #{str}"
+              end
             end
 
             #----------------------------------------------
@@ -318,7 +329,7 @@ module Pingpong
                       # ============================================================
                       @last_bounce_state = 1
 
-                      @log.write "Info: COLLISION CASE #1: P1 is not on the same line as P2 and P3"
+                      @log.write "Info: COLLISION CASE #1: P1 is not on the same line as P2 and P3" if @test_mode == 0
                       #@log.debug "COLLISION CASE #1: P1 is not on the same line as P2 and P3"
                       # find the collision point using the current velocity
                       # Note: Can collide with any surface
@@ -358,7 +369,7 @@ module Pingpong
 
                     else
                       @last_bounce_state = 0
-                      @log.write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!"
+                      @log.write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!" if @test_mode == 0
                     end
 
                   when 1
@@ -371,7 +382,7 @@ module Pingpong
                       # ==========================================================
                       @last_bounce_state = 2
 
-                      @log.write "Info: COLLISION CASE #2: P3 is not on the same line as P1 and P2"
+                      @log.write "Info: COLLISION CASE #2: P3 is not on the same line as P1 and P2" if @test_mode == 0
                       # the last known point is not on the new line
                       # so we can just use the current point and
                       # previous position for velocity and heading
@@ -381,7 +392,7 @@ module Pingpong
 
                     else
                       @last_bounce_state = 0
-                      @log.write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!"
+                      @log.write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!" if @test_mode == 0
                     end
 
                 end #/ case
@@ -404,8 +415,8 @@ module Pingpong
             #
             #----------------------------------------------
             if not @ball.x2.nil? and not @server_time_delta.nil?
-              last_deltaX = @ball.x2-@ball.x
-              last_deltaY = @ball.y2-@ball.y
+              last_deltaX = @ball.x-@ball.x2
+              last_deltaY = @ball.y-@ball.y2
               velocity = Math.hypot( last_deltaX, last_deltaY ) / @server_time_delta
               #@log.write "#{@ball.x2},#{@ball.y2} to #{@ball.x},#{@ball.y} = #{last_deltaX},#{last_deltaY} => #{@last_velocity}"
               # calculate average velocity
@@ -423,39 +434,6 @@ module Pingpong
                 @last_avg_velocity = nil
               end
               @last_velocity = velocity
-            end
-
-            #----------------------------------------------
-            #
-            # =======================================
-            # Calculate where we should aim next ball
-            # =======================================
-            #
-            # To calculate best target of opportunity we
-            # need to simulate different situations that
-            # could happend with different paddle place-
-            # ments.
-            #
-            #----------------------------------------------
-            opponent_best_target = 0
-            if @enemyPaddle.y < @config.arenaHeight / 2
-              opponent_best_target = @config.arenaHeight - 1
-            else
-              opponent_best_target = 0
-            end
-            if @AI_level > 0.0
-              #@log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
-              #
-              # Now that we know the best target of opportunity location
-              # we should calculate what is the best way to get to there
-              # since we do not know the secret formula behind the
-              # paddle physics we need to guess it.
-              #
-              # We can however estimate how much we can affect to
-              # the ball velocity using the offsets and from estimations
-              # we can create model for calculating offsets depending
-              # on the wanted target positions
-              #
             end
 
             #----------------------------------------------
@@ -523,7 +501,7 @@ module Pingpong
               # scale hit_offset depending on the estimated enter angle
               # safe angles are -25 .. +25 and anything over that should decrement the power
               angle_hit_offset_power = @math.angle_to_hit_offset_power @last_enter_angle
-              @hit_offset_power *= angle_hit_offset_power
+              #@hit_offset_power *= angle_hit_offset_power
               #@log.debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
               #
               # ---- /TODO
@@ -577,9 +555,11 @@ module Pingpong
             # TODO: Set more iterations if ball initial velocity is away from us
             #
             #----------------------------------------------
+
             distance_to_player = 0
             distance_to_enemy = 0
-            if not @ball.x2.nil? and not @server_time_delta.nil?
+            if not @ball.x2.nil? and not @ball.x3.nil? and @math.on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+
               x2 = @ball.x2
               y2 = @ball.y2
               x1 = @ball.x
@@ -598,17 +578,46 @@ module Pingpong
               if dirX != @last_dirX
                 if dirX > 0
                   if not x2.nil?
+
+                    if @test_in_progress
+                      @log.debug "TESTMODE1: Completed one pass (offset = #{@test_offset_cur}"
+                      @test_in_progress = false
+                      @test_offset_cur += @test_offset_add
+                      if @test_offset_cur > 1.0
+                        @test_offset_cur = 0.0
+                      end
+                    end
                     @block_count += 1
-                    @last_exit_angle = @math.calculate_line_angle( x2, y2, x1, y1 )
-                    @log.write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
+                    @last_exit_angle = @math.calculate_line_angle( @ball.x2, @ball.y2, @ball.x, @ball.y )
+                    #@log.write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
                     # check deviation from normal bounce angle
                     expected_exit_angle = 180 - @last_enter_angle
                     @last_deviation = @last_exit_angle - expected_exit_angle
                     if @last_enter_angle <= 90
-                      @log.write "Info: Deviation from <90 to normal exit angle = #{@last_deviation}" if $DEBUG
+                      #@log.write "Info: Deviation from <90 to normal exit angle = #{@last_deviation}" if $DEBUG
                     else
-                      @log.write "Info: Deviation from >90 to normal exit angle = #{@last_deviation}" if $DEBUG
+                      #@log.write "Info: Deviation from >90 to normal exit angle = #{@last_deviation}" if $DEBUG
                     end
+
+                    # we have changed direction, if the paddle was stationary
+                    # we should look at the last own enter and exit angles
+                    # and also the last calculated collision point
+                    if @math.is_close_to @ownPaddle.y, @ownPaddle.y2, 0.1
+                      if (@last_enter_point-@ownPaddle.y2).abs < @config.paddleHeight/2
+                        @log.debug "TEST RESULTS: #{(@last_enter_point-@ownPaddle.y2).abs}, #{@last_avg_velocity}, #{(@last_deviation).abs}" if $DEBUG and @test_mode == 1
+                        @log.write "TEST_RESULTS: #{@last_enter_point-@ownPaddle.y2}, #{@last_avg_velocity}, #{@last_deviation}"
+                        #@log.debug "=======================================================" if $DEBUG
+                        #@log.debug "== Avg velocity   : #{@last_avg_velocity}" if $DEBUG
+                        #@log.debug "== Paddle Y       : #{@ownPaddle.y2}" if $DEBUG
+                        #@log.debug "== Ball Hit Y     : #{@last_enter_point}" if $DEBUG
+                        #@log.debug "== Offset         : #{@last_enter_point-@ownPaddle.y2}" if $DEBUG
+                        #@log.debug "== Enter angle    : #{@last_enter_angle}" if $DEBUG
+                        #@log.debug "== Exit angle     : #{@last_exit_angle} (Expected: #{expected_exit_angle})" if $DEBUG
+                        #@log.debug "== Angle modifier : #{@last_deviation}" if $DEBUG
+                        #@log.debug "=======================================================" if $DEBUG
+                      end
+                    end
+
                   end
                 end
                 @last_dirX = dirX
@@ -646,6 +655,7 @@ module Pingpong
                 iterations += solve_results.iterations
                 distance_to_player += solve_results.distance
                 @last_enter_angle = @math.calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
+                @last_enter_point = p.y
                 #@log.debug "< Enter angle = #{@last_enter_angle}"
                 # TODO: Should this be enabled? This would set the hit_offset to zero if
                 #       the ball is going to hit at the paddle area at the edge of the arena
@@ -654,7 +664,8 @@ module Pingpong
                 #else
                 temp_AI_level = @AI_level
 
-                if @AI_level < 0
+                if @AI_level < 0.0
+
                   # we are trying to help the opponent :)
                   if @last_enter_angle <= 90
                     if @last_enter_angle >= 90-15
@@ -662,41 +673,153 @@ module Pingpong
                     else
                       @deviation_from_straight = 1.0
                     end
-                    temp_AI_level *= @deviation_from_straight
+                    temp_AI_level *= -@deviation_from_straight
                   else
                     if @last_enter_angle < 90+15
                       @deviation_from_straight = ( @last_enter_angle - 90 ) / 15
                     else
                       @deviation_from_straight = 1.0
                     end
-                    temp_AI_level *= -@deviation_from_straight
+                    temp_AI_level *= @deviation_from_straight
                   end
                   @hit_offset = (@hit_offset_max * @hit_offset_power) * temp_AI_level
 
-                else
-
-                  #if @block_count % 2 == 0
-
-                  # AI v0.9 - Not accurate but getting there..
-                  if p.dy < 0
-                    # Ball is going up
-                    if opponent_best_target < @config.arenaHeight/2
-                      # We should aim up
-                      @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
-                    else
-                      # We should aim down
-                      @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
-                    end
-                  else                    
-                    # Ball is going down
-                    if opponent_best_target < @config.arenaHeight/2
-                      # We should aim up
-                      @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
-                    else
-                      # We should aim down
-                      @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
+                  # use testmode?
+                  if @test_mode == 1
+                    if @last_enter_angle >= 90-0.5 and @last_enter_angle <= 90+0.5
+                      if not @test_in_progress
+                        @log.debug "TESTMODE1: Activated for next pass"
+                        @test_in_progress = true
+                      end
+                      offset_temp_max = @config.paddleHeight/2
+                      @hit_offset = offset_temp_max * @test_offset_cur
                     end
                   end
+
+                else
+
+                  #----------------------------------------------
+                  #
+                  # =======================================
+                  # Calculate where we should aim next ball
+                  # =======================================
+                  #
+                  # To calculate best target of opportunity we
+                  # need to simulate different situations that
+                  # could happend with different paddle place-
+                  # ments.
+                  #
+                  #----------------------------------------------
+                  opponent_best_target = 0
+                  if @enemyPaddle.y < @config.arenaHeight / 2
+                    opponent_best_target = @config.arenaHeight - 1
+                  else
+                    opponent_best_target = 0
+                  end
+                  # lets first simulate where the opponent is going to try to be
+                  exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, -p.dy
+                  test_vector = exit_vector.dup
+                  opponent_location = @math.solve_collisions exit_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
+                  p2 = opponent_location.point
+                  if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
+                    @enemyPaddle.set_target p2.y
+                    #@log.debug "Enemy is going to #{@enemyPaddle.target_y}"
+                  else
+                    # can't simulate, maybe too much bounces right now
+                    @enemyPaddle.set_target nil
+                  end
+
+                  #@log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
+                  #
+                  # Now that we know the best target of opportunity location
+                  # we should calculate what is the best way to get to there
+                  # since we do not know the secret formula behind the
+                  # paddle physics we need to guess it.
+                  #
+                  # We can however estimate how much we can affect to
+                  # the ball velocity using the offsets and from estimations
+                  # we can create model for calculating offsets depending
+                  # on the wanted target positions
+                  #
+                  # TODO: Gather data when the paddle is stationary and gets hit
+                  #       from different angles. We need to know the exit angles
+                  #       or the angle differences from normal vectors.
+                  #
+                  # Lets simulate seven different positions and estimated velocities
+                  # - 100%
+                  # - 50%
+                  # = 0%
+                  # + 50%
+                  # + 100%
+                  #
+                  @start_power = -1.0
+                  @power_add = 0.05
+                  @max_power = 1.0
+                  @simulations = {}
+
+                  # Note: We should assume that opponent is going for the estimated position
+                  #       because they are not stupid like BECKER :)
+                  #       So its best to calculate opponent paddle location first
+                  #@log.debug "+"
+                  cur_power = @start_power
+                  while cur_power <= @max_power
+
+                    test_vector = exit_vector.dup
+                    test_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
+                    test_vector.rotate @math.top_secret_formula test_offset
+
+                    # try to solve
+                    solve_results = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
+                    p2 = solve_results.point
+                    if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
+                      # we got result
+                      # calculate which result would be the best
+                      result_score = (p2.y - @enemyPaddle.target_y).abs.to_i
+                      result = {}
+                      result["power"] = cur_power
+                      result["y"] = solve_results.point.y
+                      result["iterations"] = solve_results.iterations
+                      @simulations[result_score] = result
+                    end
+
+                    cur_power += @power_add
+
+                  end # /while
+                  #@log.debug "-"
+
+                  # sort the results by score
+                  sorted_results = @simulations.sort { |a,b| b<=>a }
+                  #@log.debug "-------------------------------"
+                  #sorted_results.each { |key, value| 
+                  #  @log.debug "Simulated score = #{key}: I:#{value["iterations"]} P:#{value["power"]} Y:#{value["y"]}"
+                  #}
+
+                  # get the first result
+                  best_result = sorted_results.first
+                  @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level * best_result[1]["power"]
+
+                  #@log.debug "TARGET >> #{best_result[1]['y']} - #{@hit_offset}"
+
+                  # AI v0.9 - Not accurate but getting there..
+                  #if p.dy < 0
+                  #  # Ball is going up
+                  #  if opponent_best_target < @config.arenaHeight/2
+                  #    # We should aim up
+                  #    @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
+                  #  else
+                  #    # We should aim down
+                  #    @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
+                  #  end
+                  #else                    
+                  #  # Ball is going down
+                  #  if opponent_best_target < @config.arenaHeight/2
+                  #    # We should aim up
+                  #    @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
+                  #  else
+                  #    # We should aim down
+                  #    @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
+                  #  end
+                  #end
 
                 end
 

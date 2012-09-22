@@ -101,8 +101,8 @@ module Helpers
       @y = y
     end
     def set_velocity dx, dy
-      @dx = x
-      @dy = y
+      @dx = dx
+      @dy = dy
     end
     def scale sz
       @dx *= sz
@@ -110,8 +110,16 @@ module Helpers
     end
     def normalize
       power = Math.hypot( dx, dy )
-      @dx *= power
-      @dy *= power
+      @dx /= power
+      @dy /= power
+    end 
+    def rotate degrees
+      ca = ::Math.cos(-degrees*(::Math::PI/180))
+      sa = ::Math.sin(-degrees*(::Math::PI/180))
+      rx = @dx*ca-@dy*sa
+      ry = @dx*sa+@dy*ca
+      @dx = rx
+      @dy = ry
     end
     attr_accessor :x
     attr_accessor :y
@@ -189,12 +197,24 @@ module Helpers
       reset
     end
     def set_position( x, y )
+      if @y2.nil?
+        @y3 = nil
+      else
+        @y3 = @y2
+      end
+      if @y.nil?
+        @y2 = nil
+      else
+        @y2 = @y
+      end
       @x = x
       @y = y
     end
     def reset
       @x = nil
       @y = nil
+      @y2 = nil
+      @y3 = nil
       @target_y = nil
       @avg_target_y = nil
     end    
@@ -210,11 +230,23 @@ module Helpers
     end
     attr_reader :x
     attr_reader :y
+    attr_reader :y2
+    attr_reader :y3
     attr_reader :target_y
     attr_reader :avg_target_y
   end # /class
 
   class Math
+
+    # Returns top secret formula results
+    def top_secret_formula angle
+      a = Float(angle)
+      return 0 if is_close_to a, 0
+      #return (0.57125*y) = pretty goodis pretty darn good :)
+      #return (0,6-(y.abs/1500))*y
+      # from excel: =(0,57-(LOG(ITSEISARVO(B2)/500))/2000)*B2
+      return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
+    end    
 
     # Solves collisions from p1 point (Vector2) and returns
     # a new point of the resulting vector
@@ -275,10 +307,9 @@ module Helpers
 
     end # /solve_collisions
 
-
     def angle_to_hit_offset_power a
       a = (a - 90).abs # rotate to ccw 90 degrees and get difference from zero angle
-      a -= 20 # no reduction if angle is lower or equal to 20
+      a -= 30 # no reduction if angle is lower or equal to 30
       # cap angle to 0 to 35
       a = 0 if a < 0
       a = 55 if a > 55
