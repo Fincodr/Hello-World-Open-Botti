@@ -204,8 +204,15 @@ module Helpers
       end
       if @y.nil?
         @y2 = nil
+        @dy = nil
       else
         @y2 = @y
+        @dy = @y-y
+      end
+      if not @y.nil? and not @dy.nil?
+        @avg_dy = (@dy+(@y-y)) / 2
+      else
+        @avg_dy = nil
       end
       @x = x
       @y = y
@@ -215,6 +222,7 @@ module Helpers
       @y = nil
       @y2 = nil
       @y3 = nil
+      @dy = nil
       @target_y = nil
       @avg_target_y = nil
     end    
@@ -234,6 +242,8 @@ module Helpers
     attr_reader :y3
     attr_reader :target_y
     attr_reader :avg_target_y
+    attr_reader :dy
+    attr_reader :avg_dy
   end # /class
 
   class Math
@@ -242,9 +252,10 @@ module Helpers
     def top_secret_formula angle
       a = Float(angle)
       return 0 if is_close_to a, 0
-      #return (0.57125*y) = pretty goodis pretty darn good :)
-      #return (0,6-(y.abs/1500))*y
-      # from excel: =(0,57-(LOG(ITSEISARVO(B2)/500))/2000)*B2
+      #return (0.57125*y) = pretty darn good :)
+      #return (0,6-(y.abs/1500))*y = good too
+      # from excel: =(0,57-(LOG(ITSEISARVO(B2)/500))/2000)*B2 = closest?
+      #return (0.6-(a.abs/1500))*a
       return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
     end    
 

@@ -116,7 +116,7 @@ module Pingpong
       @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
       @block_count = 0 # how many times we have blocked thus far
       @last_bounce_state = 0 # 0 = no collision, collision 1st, collision 2nd
-      #@paddle_safe_margin = 4
+      @paddle_safe_margin = 2
       @paddle_slowdown_margin = 20
       @paddle_slowdown_power = 1.0
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
@@ -136,6 +136,7 @@ module Pingpong
       @hit_offset_power = 0
       @old_offset_power = 0
       @last_avg_velocity = nil
+      @last_target_y = 0
 
       # default configuration
       # will be updated from the gameIsOn server message
@@ -242,7 +243,7 @@ module Pingpong
               @config.set_arena( Float(msg_conf['maxWidth']), Float(msg_conf['maxHeight']) )
               @config.set_paddle( Float(msg_conf['paddleWidth']), Float(msg_conf['paddleHeight']) )
               @config.set_ball( Float(msg_conf['ballRadius']) )
-              h = msg_conf['paddleHeight'] / 2 # - @paddle_safe_margin # varmuuden vuoksi vielä 1 lisää marginaaliin :)
+              h = msg_conf['paddleHeight'] / 2 - @paddle_safe_margin
               if ( h < 5 )
                 h = 0
               end
@@ -491,10 +492,11 @@ module Pingpong
 
               # scale hit_offset depending on the last velocity
               # note: starting velocity is usually about 0.300
-              #@hit_offset_power = 1.0 - ( Float(@max_velocity/3) - 0.250 )
-              #@hit_offset_power = 1.0 if @hit_offset_power > 1.0
-              #@hit_offset_power = 0.0 if @hit_offset_power < 0.0
+              @hit_offset_power = 1.0 - ( Float(@max_velocity/2) - 0.250 )
+              @hit_offset_power = 1.0 if @hit_offset_power > 1.0
+              @hit_offset_power = 0.0 if @hit_offset_power < 0.0
               @hit_offset_power = 1.0
+              #@log.debug "#{@hit_offset_power}"
 
               # TODO: Enable if ball has too big velocity and calculated
               #       location is not good enough for catching.
@@ -632,17 +634,38 @@ module Pingpong
                 distance_to_enemy += solve_results.distance
                 distance_to_player += solve_results.distance
 
+                time_to_enemy = distance_to_enemy / @last_avg_velocity
+
                 # set the estimated enemy paddle location
-                @enemyPaddle.set_target(p.y)
+                # @enemyPaddle.set_target(p.y)
+                #@log.debug "Target: @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}"
+
+                # calculate opponent location at the time of impact
+                # we know how long we have before the ball is going to hit
+                # at the opponent side
+                estimated_enemy_y = @enemyPaddle.y - (@enemyPaddle.avg_dy * (time_to_enemy/100))
+                enemy_offset = -(estimated_enemy_y-p.y)
+                enemy_offset = -25 if enemy_offset < -25
+                enemy_offset = 25 if enemy_offset > 25
+                #@log.debug "Est: #{estimated_enemy_y} | Offset: #{enemy_offset} | Diff: #{estimated_enemy_y-@enemyPaddle.y} | "
+
+                #if not @enemyPaddle.avg_dy.nil?
+                #  @log.debug "Opponent paddle @ #{@enemyPaddle.y}, Velocity #{@enemyPaddle.avg_dy}"
+                #end
+
                 # calculate current angle
                 @last_enemy_enter_angle = @math.calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
-
+                
                 # bounce back and simulate again
-                x2 = p.x + p.dx
-                y2 = p.y - p.dy
-                x1 = p.x
-                y1 = p.y
-                solve_results = @math.solve_collisions x1, y1, x2, y2, @config, @max_iterations
+                #x2 = p.x + p.dx
+                #y2 = p.y - p.dy
+                #x1 = p.x
+                #y1 = p.y
+
+                exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, -p.dy
+                exit_vector.rotate @math.top_secret_formula enemy_offset
+
+                solve_results = @math.solve_collisions exit_vector.x, exit_vector.y, exit_vector.x+exit_vector.dx, exit_vector.y+exit_vector.dy, @config, @max_iterations
                 p = solve_results.point
               end
 
@@ -670,8 +693,8 @@ module Pingpong
                   @hit_offset_top += offset_cut_value
                 end
 
-                @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max))
-                @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max))
+                @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max)) * @hit_offset_power
+                @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max)) * @hit_offset_power
 
                 #@log.debug "Hit offset power: #{@hit_offset_top_powerlimit},#{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}]"
 
@@ -735,10 +758,11 @@ module Pingpong
                   else
                     opponent_best_target = 0
                   end
+
                   # lets first simulate where the opponent is going to try to be
-                  exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, -p.dy
+                  exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, p.dy
                   test_vector = exit_vector.dup
-                  opponent_location = @math.solve_collisions exit_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
+                  opponent_location = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
                   p2 = opponent_location.point
                   if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                     @enemyPaddle.set_target p2.y
@@ -816,29 +840,38 @@ module Pingpong
                   # get the first result
                   best_result = sorted_results.first
                   @hit_offset = -(@hit_offset_max * @hit_offset_power) * @AI_level * best_result[1]["power"]
+                  #@log.debug "Best score: #{best_result}"
 
-                  #@log.debug "TARGET >> #{best_result[1]['y']} - #{best_result[1]["power"]}"
+                  if ( dirX < 0 )
+                    @last_target_y = best_result[1]["y"]
+                  end
 
-                  # AI v0.9 - Not accurate but getting there..
-                  #if p.dy < 0
-                  #  # Ball is going up
-                  #  if opponent_best_target < @config.arenaHeight/2
-                  #    # We should aim up
-                  #    @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
-                  #  else
-                  #    # We should aim down
-                  #    @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
-                  #  end
-                  #else                    
-                  #  # Ball is going down
-                  #  if opponent_best_target < @config.arenaHeight/2
-                  #    # We should aim up
-                  #    @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
-                  #  else
-                  #    # We should aim down
-                  #    @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
-                  #  end
-                  #end
+                  #@log.debug "Our > #{best_result[1]['y']} - #{best_result[1]["power"]}"
+
+                  # if we are at the start of the round we are just going to
+                  # try to speed up the ball
+                  if @block_count < 3
+                    # AI v0.9 - Not accurate but getting there..
+                    if p.dy < 0
+                      # Ball is going up
+                      #if opponent_best_target < @config.arenaHeight/2
+                        # We should aim up
+                        @hit_offset = (@hit_offset_max * @hit_offset_top_powerlimit) * -@AI_level
+                      #else
+                      #  # We should aim down
+                      #  @hit_offset = (@hit_offset_max * @hit_offset_power) * -@AI_level
+                      #end
+                    else                    
+                      # Ball is going down
+                      #if opponent_best_target < @config.arenaHeight/2
+                      #  # We should aim up
+                      #  @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level
+                      #else
+                        # We should aim down
+                        @hit_offset = (@hit_offset_max * @hit_offset_bottom_powerlimit) * @AI_level
+                      #end
+                    end
+                  end
 
                 end
 
@@ -995,7 +1028,7 @@ module Pingpong
       @log.write "   |    ___|  ||     |  __|  _  |  _  ||   _|"
       @log.write "   |___|   |__||__|__|____|_____|_____||__|  "
       @log.write ""
-      @log.write "   H e l l o W o r l d O p e n   B o t  v0.9"
+      @log.write "   H e l l o W o r l d O p e n   B o t  v1.0"
       @log.write ""
       @log.write "      Coded by Fincodr aka Mika Luoma-aho"
       @log.write "      Send job offers to <fincodr@mxl.fi>"
