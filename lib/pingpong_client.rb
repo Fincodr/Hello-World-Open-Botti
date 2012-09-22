@@ -680,7 +680,7 @@ module Pingpong
 
                 # scale hit_offset depending on the estimated enter angle
                 # safe angles are -25 .. +25 and anything over that should decrement the power
-                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, (@config.paddleWidth*2)
+                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, (@config.paddleWidth)
 
                 # set the offset top and bottom max values
                 @hit_offset_top = -@hit_offset_max
@@ -696,7 +696,7 @@ module Pingpong
                 @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max)) * @hit_offset_power
                 @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max)) * @hit_offset_power
 
-                @log.debug "Hit offset power: #{@hit_offset_top_powerlimit},#{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}]"
+                #@log.debug "Hit offset power: #{@hit_offset_top_powerlimit},#{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}]"
 
                 #@hit_offset_power *= angle_hit_offset_power
                 #@log.debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
@@ -796,21 +796,17 @@ module Pingpong
                   # + 100%
                   #
                   @start_power = @hit_offset_top_powerlimit
-                  @power_add = 0.02
+                  @power_add = 0.2
                   @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
-                  #@enemyPaddle.set_target(0)
-
                   cur_power = @start_power
-                  #@log.debug "Simulating from #{@start_power} to #{@max_power}"
 
-                  while cur_power <= @max_power
+                  while cur_power <= @max_power+0.001
 
                     test_vector = exit_vector.dup
                     test_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
                     angle_change = @math.top_secret_formula test_offset
-                    #@log.debug "#{angle_change} for #{test_offset}"
                     test_vector.rotate angle_change
                     final_angle = @math.calculate_line_angle test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, test_vector.x, test_vector.y 
 
@@ -824,7 +820,7 @@ module Pingpong
                       result = {}
                       result["angle"] = final_angle
                       result["power"] = cur_power
-                      result["y"] = solve_results.point.y
+                      result["y"] = p2.y
                       result["iterations"] = solve_results.iterations
                       @simulations[result_score] = result
                     end
@@ -844,7 +840,9 @@ module Pingpong
                   # get the first result
                   best_result = sorted_results.first
 
-                  @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level * best_result[1]["power"]
+                  used_power = best_result[1]["power"]
+                  @hit_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
+                  #@log.debug "Simulating from #{@start_power} to #{@max_power}, used power #{used_power}"
 
                   #@log.debug "Best score: #{best_result}"
 
@@ -883,8 +881,7 @@ module Pingpong
 
                 end
 
-
-                @ownPaddle.set_target(p.y + @hit_offset)                
+                @ownPaddle.set_target(p.y - @hit_offset)                
 
               else
                 # ok, it was too much work, we should just go to middle and wait
