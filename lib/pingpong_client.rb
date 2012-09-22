@@ -680,7 +680,7 @@ module Pingpong
 
                 # scale hit_offset depending on the estimated enter angle
                 # safe angles are -25 .. +25 and anything over that should decrement the power
-                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, (@config.paddleWidth*1.5)
+                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, (@config.paddleWidth*2)
 
                 # set the offset top and bottom max values
                 @hit_offset_top = -@hit_offset_max
@@ -796,7 +796,7 @@ module Pingpong
                   # + 100%
                   #
                   @start_power = @hit_offset_top_powerlimit
-                  @power_add = 0.1
+                  @power_add = 0.02
                   @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
