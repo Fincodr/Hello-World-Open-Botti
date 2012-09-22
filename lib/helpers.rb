@@ -257,6 +257,7 @@ module Helpers
       # from excel: =(0,57-(LOG(ITSEISARVO(B2)/500))/2000)*B2 = closest?
       #return (0.6-(a.abs/1500))*a
       return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
+      #return (0.6*a)
     end    
 
     # Solves collisions from p1 point (Vector2) and returns

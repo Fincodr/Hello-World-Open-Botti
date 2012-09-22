@@ -645,8 +645,8 @@ module Pingpong
                 # at the opponent side
                 estimated_enemy_y = @enemyPaddle.y - (@enemyPaddle.avg_dy * (time_to_enemy/100))
                 enemy_offset = -(estimated_enemy_y-p.y)
-                enemy_offset = -25 if enemy_offset < -25
-                enemy_offset = 25 if enemy_offset > 25
+                enemy_offset = -22 if enemy_offset < -22
+                enemy_offset = 22 if enemy_offset > 22
                 #@log.debug "Est: #{estimated_enemy_y} | Offset: #{enemy_offset} | Diff: #{estimated_enemy_y-@enemyPaddle.y} | "
 
                 #if not @enemyPaddle.avg_dy.nil?
@@ -680,7 +680,7 @@ module Pingpong
 
                 # scale hit_offset depending on the estimated enter angle
                 # safe angles are -25 .. +25 and anything over that should decrement the power
-                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, @config.paddleWidth
+                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, (@config.paddleWidth*1.5)
 
                 # set the offset top and bottom max values
                 @hit_offset_top = -@hit_offset_max
@@ -762,14 +762,14 @@ module Pingpong
                   # lets first simulate where the opponent is going to try to be
                   exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, p.dy
                   test_vector = exit_vector.dup
-                  opponent_location = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
+                  opponent_location = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, @config, @max_iterations
                   p2 = opponent_location.point
                   if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                     @enemyPaddle.set_target p2.y
                     #@log.debug "Enemy is going to #{@enemyPaddle.target_y}"
                   else
                     # can't simulate, maybe too much bounces right now
-                    @enemyPaddle.set_target nil
+                    @enemyPaddle.set_target opponent_best_target
                   end
 
                   #@log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
@@ -796,29 +796,33 @@ module Pingpong
                   # + 100%
                   #
                   @start_power = @hit_offset_top_powerlimit
-                  @power_add = 0.05
+                  @power_add = 0.1
                   @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
-                  # Note: We should assume that opponent is going for the estimated position
-                  #       because they are not stupid like BECKER :)
-                  #       So its best to calculate opponent paddle location first
-                  #@log.debug "+"
+                  #@enemyPaddle.set_target(0)
+
                   cur_power = @start_power
+                  #@log.debug "Simulating from #{@start_power} to #{@max_power}"
+
                   while cur_power <= @max_power
 
                     test_vector = exit_vector.dup
-                    test_offset = -((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
-                    test_vector.rotate @math.top_secret_formula test_offset
+                    test_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
+                    angle_change = @math.top_secret_formula test_offset
+                    #@log.debug "#{angle_change} for #{test_offset}"
+                    test_vector.rotate angle_change
+                    final_angle = @math.calculate_line_angle test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, test_vector.x, test_vector.y 
 
                     # try to solve
-                    solve_results = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
+                    solve_results = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, @config, @max_iterations
                     p2 = solve_results.point
                     if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                       # we got result
                       # calculate which result would be the best
                       result_score = (p2.y - @enemyPaddle.target_y).abs.to_i
                       result = {}
+                      result["angle"] = final_angle
                       result["power"] = cur_power
                       result["y"] = solve_results.point.y
                       result["iterations"] = solve_results.iterations
@@ -828,29 +832,33 @@ module Pingpong
                     cur_power += @power_add
 
                   end # /while
-                  #@log.debug "-"
 
                   # sort the results by score
                   sorted_results = @simulations.sort { |a,b| b<=>a }
                   #@log.debug "-------------------------------"
-                  #sorted_results.each { |key, value| 
-                  #  @log.debug "Simulated score = #{key}: I:#{value["iterations"]} P:#{value["power"]} Y:#{value["y"]}"
+                  #@log.debug "Simulation normal y = #{@enemyPaddle.target_y}"
+                  #@simulations.each { |key, value| 
+                  #  @log.debug "Simulated score = #{key}: I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["y"]}"
                   #}
 
                   # get the first result
                   best_result = sorted_results.first
-                  @hit_offset = -(@hit_offset_max * @hit_offset_power) * @AI_level * best_result[1]["power"]
+
+                  @hit_offset = (@hit_offset_max * @hit_offset_power) * @AI_level * best_result[1]["power"]
+
                   #@log.debug "Best score: #{best_result}"
 
                   if ( dirX < 0 )
                     @last_target_y = best_result[1]["y"]
                   end
 
+                  # TODO: Test how it behaves with offset 0
+
                   #@log.debug "Our > #{best_result[1]['y']} - #{best_result[1]["power"]}"
 
                   # if we are at the start of the round we are just going to
                   # try to speed up the ball
-                  if @block_count < 3
+                  if @block_count < 2
                     # AI v0.9 - Not accurate but getting there..
                     if p.dy < 0
                       # Ball is going up
