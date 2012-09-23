@@ -762,7 +762,7 @@ module Pingpong
                   # lets first simulate where the opponent is going to try to be
                   exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, p.dy
                   test_vector = exit_vector.dup
-                  opponent_location = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, @config, @max_iterations
+                  opponent_location = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
                   p2 = opponent_location.point
                   if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                     @enemyPaddle.set_target p2.y
@@ -841,7 +841,9 @@ module Pingpong
                   best_result = sorted_results.first
 
                   used_power = best_result[1]["power"]
-                  @hit_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
+                  @hit_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * used_power
+
+                  #@log.debug "Hit offset >> #{@hit_offset} << #{cur_power} "
                   #@log.debug "Simulating from #{@start_power} to #{@max_power}, used power #{used_power}"
 
                   #@log.debug "Best score: #{best_result}"
