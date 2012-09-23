@@ -829,7 +829,7 @@ module Pingpong
                   # + 100%
                   #
                   @start_power = @hit_offset_top_powerlimit
-                  @power_add = 0.1
+                  @power_add = 0.05
                   @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
@@ -978,7 +978,6 @@ module Pingpong
             # Simulation code end
             #
             ###############################################
-
 
             if @local_time - @updatedLastTimestamp > @updateRate && @ownPaddle.target_y != nil #&& @ownPaddle.avg_target_y != nil
 
