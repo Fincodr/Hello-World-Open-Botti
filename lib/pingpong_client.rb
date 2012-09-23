@@ -676,7 +676,6 @@ module Pingpong
                 enemy_offset = -(estimated_enemy_y-p.y)
                 enemy_offset = -22 if enemy_offset < -22
                 enemy_offset = 22 if enemy_offset > 22
-                #@log.debug "Est: #{estimated_enemy_y} | Offset: #{enemy_offset} | Diff: #{estimated_enemy_y-@enemyPaddle.y} | "
 
                 #if not @enemyPaddle.avg_dy.nil?
                 #  @log.debug "Opponent paddle @ #{@enemyPaddle.y}, Velocity #{@enemyPaddle.avg_dy}"
@@ -686,11 +685,6 @@ module Pingpong
                 @last_enemy_enter_angle = @math.calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
                 
                 # bounce back and simulate again
-                #x2 = p.x + p.dx
-                #y2 = p.y - p.dy
-                #x1 = p.x
-                #y1 = p.y
-
                 exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, -p.dy
                 exit_vector.rotate @math.top_secret_formula enemy_offset
 
@@ -781,7 +775,7 @@ module Pingpong
                   # ments.
                   #
                   #----------------------------------------------
-                  if distance_to_player > 300
+                  if distance_to_player > 400
                     # allow "switch" sides only if our distance to ball is more than 300 pixels
                     if @enemyPaddle.y < @config.arenaHeight / 2
                       @opponent_best_target = @config.arenaHeight - 1
