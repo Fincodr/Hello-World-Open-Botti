@@ -865,9 +865,9 @@ module Pingpong
                       # If we are near the edges and the incoming angle is less than 45
                       # degrees we should try to aim the bottom to force the opponent
                       # to move closer
-                      if @ownPaddle.y < @config.arenaHeight/4
+                      if @ownPaddle.y < @config.arenaHeight/4.5
                         @opponent_best_target = 0
-                      elsif @ownPaddle.y > @config.arenaHeight - @config.arenaHeight/4
+                      elsif @ownPaddle.y > @config.arenaHeight - @config.arenaHeight/4.5
                         @opponent_best_target = @config.arenaHeight-1
                       end
 
