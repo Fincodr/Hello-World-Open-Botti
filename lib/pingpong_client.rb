@@ -137,6 +137,7 @@ module Pingpong
       @old_offset_power = 0
       @last_avg_velocity = nil
       @last_target_y = 0
+      @last_target_result = nil
 
       # default configuration
       # will be updated from the gameIsOn server message
@@ -638,7 +639,22 @@ module Pingpong
 
                 # set the estimated enemy paddle location
                 # @enemyPaddle.set_target(p.y)
-                #@log.debug "Target: @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}"
+                if not @last_target_result.nil?
+                  temp_result = @last_target_result[1]
+                  @log.debug "---------------------------------------------"
+                  @log.debug "Enter Angle was : #{@last_enter_angle}"
+                  @log.debug "Exit Angle was  : #{180-@last_enter_angle} (calculated)"
+                  @log.debug "Exit Angle was  : #{@last_exit_angle} (actual)"
+                  @log.debug "Exit Angle was  : #{temp_result["angle"]} (wanted)"
+                  @log.debug "Exit Angle DIFF : #{@last_exit_angle-(180-@last_enter_angle)} (actual)"
+                  @log.debug "Exit Angle DIFF : #{@math.top_secret_formula temp_result["offset"]} (wanted)"
+                  @log.debug "Exit Angle ERROR: #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}"
+                  @log.debug "Used Offset was : #{temp_result["offset"]}"
+                  @log.debug "Used Power was  : #{temp_result["power"]}"
+                  @log.debug "Target          : @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}"
+                  @log.write "TARGET_RESULTS: #{@last_avg_velocity}, #{temp_result["offset"]}, #{@last_exit_angle-(180-@last_enter_angle)}, #{@math.top_secret_formula temp_result["offset"]}, #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}"
+                  @last_target_result = nil
+                end
 
                 # calculate opponent location at the time of impact
                 # we know how long we have before the ball is going to hit
@@ -813,44 +829,70 @@ module Pingpong
                     # try to solve
                     solve_results = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, @config, @max_iterations
                     p2 = solve_results.point
+                    distance_back = solve_results.distance
                     if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                       # we got result
-                      # calculate which result would be the best
-                      result_score = (p2.y - @enemyPaddle.target_y).abs.to_i
-                      result = {}
-                      result["angle"] = final_angle
-                      result["power"] = cur_power
-                      result["y"] = p2.y
-                      result["iterations"] = solve_results.iterations
-                      @simulations[result_score] = result
+                      # bounce back to us
+                      test_vector2 = Helpers::Vector2.new p2.x, p2.y, p2.x-p2.dx, p2.y+p2.dy
+                      solve_results2 = @math.solve_collisions test_vector2.x, test_vector2.y, test_vector2.x+test_vector2.dx, test_vector2.y-test_vector2.dy, @config, @max_iterations
+                      p3 = solve_results2.point
+                      distance_back += solve_results2.distance
+
+                      distance_to_paddle = (p3.y - @ownPaddle.y).abs
+                      paddle_time_to_ball = distance_to_paddle # own paddle moves at maximum of 10 pixels per 10th of a second
+                      ball_time_to_paddle = (distance_back / @last_avg_velocity) / 100.0
+
+                      if paddle_time_to_ball < ball_time_to_paddle
+                        # we can make it, keep the result
+                        #@log.debug "Simulated back to us at #{p3.y}, Btime: #{ball_time_to_paddle}, Pd: #{distance_to_paddle}, Ptime: #{paddle_time_to_ball}"
+
+                        # calculate which result would be the best
+                        result_score = (p2.y - @enemyPaddle.target_y).abs.to_i
+                        result = {}
+                        result["offset"] = test_offset
+                        result["angle"] = final_angle
+                        result["power"] = cur_power
+                        result["target-y"] = p2.y
+                        result["own-y"] = p3.y
+                        result["iterations"] = solve_results.iterations
+                        @simulations[result_score] = result
+                      end
+
                     end
 
                     cur_power += @power_add
 
                   end # /while
 
-                  # sort the results by score
-                  sorted_results = @simulations.sort { |a,b| b<=>a }
-                  #@log.debug "-------------------------------"
-                  #@log.debug "Simulation normal y = #{@enemyPaddle.target_y}"
-                  #@simulations.each { |key, value| 
-                  #  @log.debug "Simulated score = #{key}: I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["y"]}"
-                  #}
+                  if not @simulations.empty?
+                    # we got some result we can use
+                    # sort the results by score
+                    sorted_results = @simulations.sort { |a,b| b<=>a }
+                    #@log.debug "-------------------------------"
+                    #@log.debug "Simulation normal y = #{@enemyPaddle.target_y}"
+                    #@simulations.each { |key, value| 
+                    #  @log.debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}"
+                    #}
+                    # get the first result
+                    best_result = sorted_results.first
 
-                  # get the first result
-                  best_result = sorted_results.first
-
-                  used_power = best_result[1]["power"]
-                  @hit_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * used_power
+                    used_power = best_result[1]["power"]
+                    @hit_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * used_power
+                    if ( dirX < 0 )
+                      @last_target_y = best_result[1]["target-y"]
+                      @last_target_result = best_result.dup
+                    end
+                  else
+                    # we do not have any simulation results to use
+                    # so we should just try to hit at center
+                    @hit_offset = 0
+                  end
 
                   #@log.debug "Hit offset >> #{@hit_offset} << #{cur_power} "
                   #@log.debug "Simulating from #{@start_power} to #{@max_power}, used power #{used_power}"
 
                   #@log.debug "Best score: #{best_result}"
 
-                  if ( dirX < 0 )
-                    @last_target_y = best_result[1]["y"]
-                  end
 
                   # TODO: Test how it behaves with offset 0
 

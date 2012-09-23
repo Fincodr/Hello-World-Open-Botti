@@ -249,15 +249,19 @@ module Helpers
   class Math
 
     # Returns top secret formula results
-    def top_secret_formula angle
-      a = Float(angle)
+    def top_secret_formula offset
+      a = Float(offset)
       return 0 if is_close_to a, 0
       #return (0.57125*y) = pretty darn good :)
       #return (0,6-(y.abs/1500))*y = good too
       # from excel: =(0,57-(LOG(ITSEISARVO(B2)/500))/2000)*B2 = closest?
       #return (0.6-(a.abs/1500))*a
-      return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
       #return (0.6*a)
+      # trendiviivan mukaan testi :-)
+      return 0.5945*a + 0.0588
+      #return 0.5509*a + 0.2178
+
+      #return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
     end    
 
     # Solves collisions from p1 point (Vector2) and returns
@@ -337,7 +341,11 @@ module Helpers
     # second parameter that is usually the
     # paddle width (10 pixels for example)
     def angle_to_hit_offset_cut a, b
-      return -(::Math.cos((::Math::PI/180)*a))*b
+      if a < 90
+        return -(::Math.cos((::Math::PI/180)*a))*b-2
+      else
+        return -(::Math.cos((::Math::PI/180)*a))*b+2
+      end
     end # /angle_to_hit_offset_cut
 
     def is_close_to( a, b, diff = 0.001 )
