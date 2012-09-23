@@ -136,8 +136,13 @@ module Pingpong
       @hit_offset_power = 0
       @old_offset_power = 0
       @last_avg_velocity = nil
+      @opponent_best_target = 0
       @last_target_y = 0
       @last_target_result = nil
+      @last_target_results = nil
+      @last_target_ymin = 0
+      @last_target_ymax = 0
+      @last_target_opponent_y = 0
 
       # default configuration
       # will be updated from the gameIsOn server message
@@ -492,12 +497,10 @@ module Pingpong
               # ---- /TODO
 
               # scale hit_offset depending on the last velocity
-              # note: starting velocity is usually about 0.300
-              @hit_offset_power = 1.0 - ( Float(@max_velocity/2) - 0.250 )
+              # note: starting velocity is usually about 0.250
+              @hit_offset_power = 1.0 - ( Float(@max_velocity/2) - 0.350 )
               @hit_offset_power = 1.0 if @hit_offset_power > 1.0
               @hit_offset_power = 0.0 if @hit_offset_power < 0.0
-              @hit_offset_power = 1.0
-              #@log.debug "#{@hit_offset_power}"
 
               # TODO: Enable if ball has too big velocity and calculated
               #       location is not good enough for catching.
@@ -641,17 +644,22 @@ module Pingpong
                 # @enemyPaddle.set_target(p.y)
                 if not @last_target_result.nil?
                   temp_result = @last_target_result[1]
-                  @log.debug "---------------------------------------------"
-                  @log.debug "Enter Angle was : #{@last_enter_angle}"
-                  @log.debug "Exit Angle was  : #{180-@last_enter_angle} (calculated)"
-                  @log.debug "Exit Angle was  : #{@last_exit_angle} (actual)"
-                  @log.debug "Exit Angle was  : #{temp_result["angle"]} (wanted)"
-                  @log.debug "Exit Angle DIFF : #{@last_exit_angle-(180-@last_enter_angle)} (actual)"
-                  @log.debug "Exit Angle DIFF : #{@math.top_secret_formula temp_result["offset"]} (wanted)"
-                  @log.debug "Exit Angle ERROR: #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}"
-                  @log.debug "Used Offset was : #{temp_result["offset"]}"
-                  @log.debug "Used Power was  : #{temp_result["power"]}"
-                  @log.debug "Target          : @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}"
+                  @log.debug "---------------------------------------------" if $DEBUG
+                  @log.debug "Enter Angle was : #{@last_enter_angle}" if $DEBUG
+                  @log.debug "Exit Angle was  : #{180-@last_enter_angle} (calculated)" if $DEBUG
+                  @log.debug "Exit Angle was  : #{@last_exit_angle} (actual)" if $DEBUG
+                  @log.debug "Exit Angle was  : #{temp_result["angle"]} (wanted)" if $DEBUG
+                  @log.debug "Exit Angle DIFF : #{@last_exit_angle-(180-@last_enter_angle)} (actual)" if $DEBUG
+                  @log.debug "Exit Angle DIFF : #{@math.top_secret_formula temp_result["offset"]} (wanted)" if $DEBUG
+                  @log.debug "Exit Angle ERROR: #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}" if $DEBUG
+                  @log.debug "Used Offset was : #{temp_result["offset"]}" if $DEBUG
+                  @log.debug "Used Power was  : #{temp_result["power"]}" if $DEBUG
+                  @log.debug "Opponent-y was  : #{@last_target_opponent_y}" if $DEBUG
+                  @log.debug "Target          : @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}" if $DEBUG
+                  @log.debug "Target min/max  : @ #{@last_target_ymin} | #{@last_target_ymax}" if $DEBUG
+                  @last_target_results.each { |key, value| 
+                    @log.debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}"
+                  }
                   @log.write "TARGET_RESULTS: #{@last_avg_velocity}, #{temp_result["offset"]}, #{@last_exit_angle-(180-@last_enter_angle)}, #{@math.top_secret_formula temp_result["offset"]}, #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}"
                   @last_target_result = nil
                 end
@@ -696,7 +704,7 @@ module Pingpong
 
                 # scale hit_offset depending on the estimated enter angle
                 # safe angles are -25 .. +25 and anything over that should decrement the power
-                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, (@config.paddleWidth)
+                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, (@config.paddleWidth-2)
 
                 # set the offset top and bottom max values
                 @hit_offset_top = -@hit_offset_max
@@ -712,7 +720,7 @@ module Pingpong
                 @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max)) * @hit_offset_power
                 @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max)) * @hit_offset_power
 
-                #@log.debug "Hit offset power: #{@hit_offset_top_powerlimit},#{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}]"
+                #@log.debug "Offset P: #{@hit_offset_top_powerlimit}, #{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}] < #{@hit_offset_power}"
 
                 #@hit_offset_power *= angle_hit_offset_power
                 #@log.debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
@@ -768,11 +776,13 @@ module Pingpong
                   # ments.
                   #
                   #----------------------------------------------
-                  opponent_best_target = 0
-                  if @enemyPaddle.y < @config.arenaHeight / 2
-                    opponent_best_target = @config.arenaHeight - 1
-                  else
-                    opponent_best_target = 0
+                  if distance_to_player > 250
+                    # allow "switch" sides only if our distance to ball is more than 250 pixels
+                    if @enemyPaddle.y < @config.arenaHeight / 2
+                      @opponent_best_target = @config.arenaHeight - 1
+                    else
+                      @opponent_best_target = 0
+                    end
                   end
 
                   # lets first simulate where the opponent is going to try to be
@@ -785,7 +795,7 @@ module Pingpong
                     #@log.debug "Enemy is going to #{@enemyPaddle.target_y}"
                   else
                     # can't simulate, maybe too much bounces right now
-                    @enemyPaddle.set_target opponent_best_target
+                    @enemyPaddle.set_target @opponent_best_target
                   end
 
                   #@log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
@@ -812,11 +822,14 @@ module Pingpong
                   # + 100%
                   #
                   @start_power = @hit_offset_top_powerlimit
-                  @power_add = 0.05
+                  @power_add = 0.1
                   @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
                   cur_power = @start_power
+
+                  @last_target_ymin = @config.arenaHeight+1
+                  @last_target_ymax = -1
 
                   while cur_power <= @max_power+0.001
 
@@ -842,21 +855,24 @@ module Pingpong
                       paddle_time_to_ball = distance_to_paddle # own paddle moves at maximum of 10 pixels per 10th of a second
                       ball_time_to_paddle = (distance_back / @last_avg_velocity) / 100.0
 
-                      if paddle_time_to_ball < ball_time_to_paddle
+                      #if paddle_time_to_ball < ball_time_to_paddle
                         # we can make it, keep the result
                         #@log.debug "Simulated back to us at #{p3.y}, Btime: #{ball_time_to_paddle}, Pd: #{distance_to_paddle}, Ptime: #{paddle_time_to_ball}"
 
                         # calculate which result would be the best
-                        result_score = (p2.y - @enemyPaddle.target_y).abs.to_i
+                        # TODO: use the target_y and current y to figure out where we should aim...
+                        result_score = (p2.y - @opponent_best_target).abs.to_i
                         result = {}
                         result["offset"] = test_offset
                         result["angle"] = final_angle
                         result["power"] = cur_power
                         result["target-y"] = p2.y
+                        @last_target_ymin = p2.y if p2.y < @last_target_ymin
+                        @last_target_ymax = p2.y if p2.y > @last_target_ymax
                         result["own-y"] = p3.y
                         result["iterations"] = solve_results.iterations
                         @simulations[result_score] = result
-                      end
+                      #end
 
                     end
 
@@ -867,7 +883,7 @@ module Pingpong
                   if not @simulations.empty?
                     # we got some result we can use
                     # sort the results by score
-                    sorted_results = @simulations.sort { |a,b| b<=>a }
+                    sorted_results = @simulations.sort { |a,b| a<=>b }
                     #@log.debug "-------------------------------"
                     #@log.debug "Simulation normal y = #{@enemyPaddle.target_y}"
                     #@simulations.each { |key, value| 
@@ -876,11 +892,26 @@ module Pingpong
                     # get the first result
                     best_result = sorted_results.first
 
-                    used_power = best_result[1]["power"]
+                    # if the enter angle is too low we will try to change the angle 
+                    #if @math.is_close_to(@last_enter_angle,90,2)
+                    #  # get the ball moving
+                    #  @log.debug "Note: Trying to get the ball moving at y-axis"
+                    #  if @last_enter_angle < 90
+                    #    used_power = @hit_offset_bottom_powerlimit
+                    #  else
+                    #    user_power = @hit_offset_top_powerlimit
+                    #  end
+                    #else
+                      # normal AI activated
+                      used_power = best_result[1]["power"]
+                    #end
+
                     @hit_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * used_power
                     if ( dirX < 0 )
                       @last_target_y = best_result[1]["target-y"]
                       @last_target_result = best_result.dup
+                      @last_target_results = @simulations.dup
+                      @last_target_opponent_y = @enemyPaddle.y
                     end
                   else
                     # we do not have any simulation results to use

@@ -258,10 +258,9 @@ module Helpers
       #return (0.6-(a.abs/1500))*a
       #return (0.6*a)
       # trendiviivan mukaan testi :-)
-      return 0.5945*a + 0.0588
+      #return 0.5945*a + 0.0588
       #return 0.5509*a + 0.2178
-
-      #return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
+      return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
     end    
 
     # Solves collisions from p1 point (Vector2) and returns
@@ -342,9 +341,9 @@ module Helpers
     # paddle width (10 pixels for example)
     def angle_to_hit_offset_cut a, b
       if a < 90
-        return -(::Math.cos((::Math::PI/180)*a))*b-2
+        return -(::Math.cos((::Math::PI/180)*a))*b-3
       else
-        return -(::Math.cos((::Math::PI/180)*a))*b+2
+        return -(::Math.cos((::Math::PI/180)*a))*b+3
       end
     end # /angle_to_hit_offset_cut
 
