@@ -503,7 +503,7 @@ module Pingpong
 
               # scale hit_offset depending on the last velocity
               # note: starting velocity is usually about 0.250
-              @hit_offset_power = 1.0 - ( Float(@max_velocity/2) - 0.350 )
+              @hit_offset_power = 1.0 - ( Float(@max_velocity) - 0.350 )
               @hit_offset_power = 1.0 if @hit_offset_power > 1.0
               @hit_offset_power = 0.0 if @hit_offset_power < 0.0
 
@@ -662,9 +662,9 @@ module Pingpong
                   @log.debug "Opponent-y was  : #{@last_target_opponent_y}" if $DEBUG
                   @log.debug "Target          : @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}" if $DEBUG
                   @log.debug "Target min/max  : @ #{@last_target_ymin} | #{@last_target_ymax}" if $DEBUG
-                  @last_target_results.each { |key, value| 
-                    @log.debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}" if $DEBUG
-                  }
+                  #@last_target_results.each { |key, value| 
+                  #  @log.debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}" if $DEBUG
+                  #}
                   @log.write "TARGET_RESULTS: #{@last_avg_velocity}, #{temp_result["offset"]}, #{@last_exit_angle-(180-@last_enter_angle)}, #{@math.top_secret_formula temp_result["offset"]}, #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}"
                   @last_target_result = nil
                 end
@@ -829,7 +829,7 @@ module Pingpong
                   # + 100%
                   #
                   @start_power = @hit_offset_top_powerlimit
-                  @power_add = 0.05
+                  @power_add = 0.025
                   @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
@@ -861,6 +861,15 @@ module Pingpong
                       distance_to_paddle = (p3.y - @ownPaddle.y).abs
                       paddle_time_to_ball = distance_to_paddle # own paddle moves at maximum of 10 pixels per 10th of a second
                       ball_time_to_paddle = (distance_back / @last_avg_velocity) / 100.0
+
+                      # If we are near the edges and the incoming angle is less than 45
+                      # degrees we should try to aim the bottom to force the opponent
+                      # to move closer
+                      if @ownPaddle.y < @config.arenaHeight/4
+                        @opponent_best_target = 0
+                      elsif @ownPaddle.y > @config.arenaHeight - @config.arenaHeight/4
+                        @opponent_best_target = @config.arenaHeight-1
+                      end
 
                       #if paddle_time_to_ball < ball_time_to_paddle
                         # we can make it, keep the result

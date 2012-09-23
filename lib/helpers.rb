@@ -258,9 +258,9 @@ module Helpers
       #return (0.6-(a.abs/1500))*a
       #return (0.6*a)
       # trendiviivan mukaan testi :-)
-      return 0.5945*a + 0.0588
+      #return 0.5945*a + 0.0588
       #return 0.5509*a + 0.2178
-      #return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
+      return (0.57 - (::Math.log10(a.abs/500.0)/2000.0))*a
     end    
 
     # Solves collisions from p1 point (Vector2) and returns
