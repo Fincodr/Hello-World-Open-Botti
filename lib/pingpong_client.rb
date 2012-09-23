@@ -716,14 +716,14 @@ module Pingpong
                 @hit_offset_bottom = @hit_offset_max
                 if offset_cut_value <= 0
                   # we need to cut the bottom
-                  @hit_offset_bottom += offset_cut_value
+                  @hit_offset_bottom += offset_cut_value * (1.0+(1.0-@hit_offset_power))
                 else
                   # we need to cut the top
-                  @hit_offset_top += offset_cut_value
+                  @hit_offset_top += offset_cut_value * (1.0+(1.0-@hit_offset_power))
                 end
 
-                @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max)) * @hit_offset_power
-                @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max)) * @hit_offset_power
+                @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max)) #* @hit_offset_power
+                @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max)) #* @hit_offset_power
 
                 #@log.debug "Offset P: #{@hit_offset_top_powerlimit}, #{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}] < #{@hit_offset_power}"
 
@@ -781,8 +781,8 @@ module Pingpong
                   # ments.
                   #
                   #----------------------------------------------
-                  if distance_to_player > 250
-                    # allow "switch" sides only if our distance to ball is more than 250 pixels
+                  if distance_to_player > 300
+                    # allow "switch" sides only if our distance to ball is more than 300 pixels
                     if @enemyPaddle.y < @config.arenaHeight / 2
                       @opponent_best_target = @config.arenaHeight - 1
                       #@log.debug "DOWN"
