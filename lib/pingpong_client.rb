@@ -181,7 +181,12 @@ module Pingpong
     def react_to_messages_from_server(tcp)
       while json = tcp.gets
         message = JSON.parse(json)
-        case message['msgType']
+        begin
+          msgtype = message['msgType']
+        rescue
+          msgtype = 'unknown'
+        end
+        case msgtype
 
           when 'joined'
             @log.write "< joined: #{json}"
@@ -658,7 +663,7 @@ module Pingpong
                   @log.debug "Target          : @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}" if $DEBUG
                   @log.debug "Target min/max  : @ #{@last_target_ymin} | #{@last_target_ymax}" if $DEBUG
                   @last_target_results.each { |key, value| 
-                    @log.debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}"
+                    @log.debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}" if $DEBUG
                   }
                   @log.write "TARGET_RESULTS: #{@last_avg_velocity}, #{temp_result["offset"]}, #{@last_exit_angle-(180-@last_enter_angle)}, #{@math.top_secret_formula temp_result["offset"]}, #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}"
                   @last_target_result = nil
@@ -704,7 +709,7 @@ module Pingpong
 
                 # scale hit_offset depending on the estimated enter angle
                 # safe angles are -25 .. +25 and anything over that should decrement the power
-                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, (@config.paddleWidth-2)
+                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, 7
 
                 # set the offset top and bottom max values
                 @hit_offset_top = -@hit_offset_max
@@ -780,8 +785,10 @@ module Pingpong
                     # allow "switch" sides only if our distance to ball is more than 250 pixels
                     if @enemyPaddle.y < @config.arenaHeight / 2
                       @opponent_best_target = @config.arenaHeight - 1
+                      @log.debug "DOWN"
                     else
                       @opponent_best_target = 0
+                      @log.debug "UP"
                     end
                   end
 
@@ -1080,7 +1087,7 @@ module Pingpong
             $stdout.flush
           else
             # unknown message received
-            @log.write "< unknown_message: #{json}" if $DEBUG
+            @log.write "< unknown_message: #{json}"
         end
       end
     end

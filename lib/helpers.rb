@@ -341,9 +341,9 @@ module Helpers
     # paddle width (10 pixels for example)
     def angle_to_hit_offset_cut a, b
       if a < 90
-        return -(::Math.cos((::Math::PI/180)*a))*b-3
+        return -(::Math.cos((::Math::PI/180)*a))*b-2
       else
-        return -(::Math.cos((::Math::PI/180)*a))*b+3
+        return -(::Math.cos((::Math::PI/180)*a))*b+2
       end
     end # /angle_to_hit_offset_cut
 
