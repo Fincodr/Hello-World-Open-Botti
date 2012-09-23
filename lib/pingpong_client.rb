@@ -785,10 +785,10 @@ module Pingpong
                     # allow "switch" sides only if our distance to ball is more than 250 pixels
                     if @enemyPaddle.y < @config.arenaHeight / 2
                       @opponent_best_target = @config.arenaHeight - 1
-                      @log.debug "DOWN"
+                      #@log.debug "DOWN"
                     else
                       @opponent_best_target = 0
-                      @log.debug "UP"
+                      #@log.debug "UP"
                     end
                   end
 
