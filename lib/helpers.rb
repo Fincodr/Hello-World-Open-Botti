@@ -50,6 +50,14 @@ module Helpers
       $stderr.puts "#{timestamp} #{msg}"
     end
 
+    def write1(msg)
+      $stdout.write "#{msg}"
+    end
+
+    def debug1(msg)
+      $stderr.write "#{msg}"
+    end
+
   end
 
   class SolveResult

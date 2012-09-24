@@ -35,8 +35,10 @@ require 'fileutils'
 # added libraries
 require 'time'
 require 'date'
+require 'thread'
 require 'launchy' if $DEBUG
 require 'benchmark' if $DEBUG
+require_relative 'simulation'
 require_relative 'helpers'
 
 module Pingpong
@@ -76,6 +78,12 @@ module Pingpong
       @test_offset_add = 0.05
       @test_in_progress = false
 
+      # Initialize simulation
+      @Simulation = Simulation::CSimulation.new
+
+      # Start threads
+      @simulation_thread_handle = Thread.new{simulation_thread()}
+
       reset_round
 
       # open socket to server
@@ -103,6 +111,8 @@ module Pingpong
       @local_time_delta = 0
       @local_vs_server_delta = nil
       @local_vs_server_drift = 0
+
+      @last_sent_message = nil
 
       # last updated timestamps
       @updatedLastTimestamp = 0
@@ -176,6 +186,36 @@ module Pingpong
       @log.write "> join(#{player_name})"
       tcp.puts join_message(player_name)
       react_to_messages_from_server tcp
+    end
+
+    def simulation_thread
+      fps = 30
+      # Thread: Simulation handler
+      start_time = Time.now.to_f * 1000.0
+      tick = 1000/fps
+      last_update = start_time
+      while true
+        cur_time = Time.now.to_f * 1000
+        delta_time = cur_time - last_update
+        @log.debug1 "\r#{delta_time}   "
+        last_update = cur_time
+        # get the elapsed time
+        elapsed_time = cur_time - start_time 
+        # calculate when the next tick should start
+        next_tick = elapsed_time + tick
+        #@log.debug1 "\r#{elapsed_time}   "
+
+        # calculate how many milliseconds we should sleep
+        # to get to the next tick
+        time_left = next_tick - (Time.now.to_f * 1000 - start_time)
+        sleep time_left/1000.0
+        #@simulation.update delta_time
+      end
+    end
+
+    def messages_thread
+      # Thread: message handler
+
     end
 
     def react_to_messages_from_server(tcp)
@@ -273,6 +313,10 @@ module Pingpong
             rescue
               @log.write "Warning: Player block missing from json packet"
             end
+
+            @Simulation.add_state @ball.x, @ball.y, @ownPaddle.y, @enemyPaddle.y
+
+            #@log.debug "Simulation states : #{@Simulation.States.count}"
 
             if not $DEBUG
               if @test_mode == 0
@@ -871,6 +915,19 @@ module Pingpong
                         @opponent_best_target = @config.arenaHeight-1
                       end
 
+                      # We should set the best target away from us towards the center
+                      max_movement_amount = (distance_back / @last_avg_velocity) / 10.0
+
+                      if @ownPaddle.y < @config.arenaHeight
+                        # go towards the center (down)
+                        target_y = @ownPaddle.y + max_movement_amount
+                        target_y = @config.arenaHeight / 2 if target_y >= @config.arenaHeight / 2
+                      else
+                        # go towards the center (up)
+                        target_y = @ownPaddle.y - max_movement_amount
+                        target_y = @config.arenaHeight / 2 if target_y <= @config.arenaHeight / 2
+                      end
+
                       #if paddle_time_to_ball < ball_time_to_paddle
                         # we can make it, keep the result
                         #@log.debug "Simulated back to us at #{p3.y}, Btime: #{ball_time_to_paddle}, Pd: #{distance_to_paddle}, Ptime: #{paddle_time_to_ball}"
@@ -1046,17 +1103,56 @@ module Pingpong
               #  delta = -last_deltaY * @AI_level
               #end
 
+              # 1. Get the distance to the target location
+              distance_to_target = (@wanted_y - @ownPaddle.y).abs
+              #@log.debug "Distance to target location: #{distance_to_ball}"
+
+              # 2. Get the distance to the ball from the paddle edge
+              #@log.debug "Ball Distance to paddle: #{distance_to_player}"
+
+              # 3. Calculate the time that the ball takes to get to the
+              #    paddle edge
+              time_to_player = (distance_to_player / @last_avg_velocity)
+              #@log.debug "Ball Time to paddle: #{time_to_player} ms"
+
+              # 4. We have that time to go to the target location
+              #    so calculate what should be the speed
+              #distance_to_target_at_slowspeed = 50
+              speed = (distance_to_target).abs / (time_to_player / 10)
+
+              # First we need to know about how many milliseconds we have time
+              # to get to the target location
+              # speed = (distance_to_player / @last_avg_velocity) / 10000.0
+              speed = 0.2 if speed < 0.2
+              speed = 1.0 if speed > 1.0
+              # @log.debug "#{speed}"
+
               if delta < 0
                 @log.write "> changeDir(#{speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
-                tcp.puts movement_message(speed)
+                message = movement_message(speed)
+                if message != @last_sent_message
+                  #@log.debug "-"
+                  tcp.puts message
+                  @last_sent_message = message
+                end
 
               elsif delta > 0
                 @log.write "> changeDir(#{-speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
-                tcp.puts movement_message(-speed)
+                message = movement_message(-speed)
+                if message != @last_sent_message
+                  #@log.debug "+"
+                  tcp.puts message
+                  @last_sent_message = message
+                end
 
               else
                 @log.write "> changeDir(0) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
-                tcp.puts movement_message(0)
+                message = movement_message(0)
+                if message != @last_sent_message
+                  #@log.debug "="
+                  tcp.puts message
+                  @last_sent_message = message
+                end
 
               end
 
@@ -1123,7 +1219,7 @@ module Pingpong
       @log.write "   |    ___|  ||     |  __|  _  |  _  ||   _|"
       @log.write "   |___|   |__||__|__|____|_____|_____||__|  "
       @log.write ""
-      @log.write "   H e l l o W o r l d O p e n   B o t  v1.0"
+      @log.write "   H e l l o W o r l d O p e n   B o t  v1.1"
       @log.write ""
       @log.write "      Coded by Fincodr aka Mika Luoma-aho"
       @log.write "      Send job offers to <fincodr@mxl.fi>"
