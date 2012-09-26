@@ -159,7 +159,7 @@ module Pingpong
       @total_rounds += 1
 
       # temp
-      @wanted_y = 240+25
+      @wanted_y = 240
       @old_wanted_y = @wanted_y
       @passed_wanted_y = false
       @show_json = true
@@ -907,20 +907,32 @@ module Pingpong
                     #}
                     # get the first result
                     best_result = sorted_results.first
+                    used_power = best_result[1]["power"]
 
-                    # if the enter angle is too low we will try to change the angle 
-                    #if @math.is_close_to(@last_enter_angle,90,2)
-                    #  # get the ball moving
-                    #  @log.debug "Note: Trying to get the ball moving at y-axis"
-                    #  if @last_enter_angle < 90
-                    #    used_power = @hit_offset_bottom_powerlimit
-                    #  else
-                    #    user_power = @hit_offset_top_powerlimit
-                    #  end
-                    #else
-                      # normal AI activated
-                      used_power = best_result[1]["power"]
-                    #end
+                    # New AI #1
+                    #
+                    # If ball is coming in high angle and the velocity is over 0.45
+                    # we should try to move the paddle so that we get maximum angle
+                    # change.
+                    #                    
+                    if @last_avg_velocity > 0.40 and (@last_enter_angle-90).abs > 40
+                      if p.y > @config.arenaHeight - @config.arenaHeight / 4
+                        # ball is going to hit at bottom 1/4
+                        if p.dy > 0
+                          # Ball is going down, we should try to aim at max up paddle
+                          used_power = -1.0
+                          @log.debug "New AI #1: Trying to change the angle as much as possible"
+                        end
+                      elsif p.y < @config.arenaHeight / 4
+                        # ball is going to hit at top 1/4
+                        if p.dy < 0
+                          # Ball is going up, we should try to aim at max down paddle
+                          used_power = 1.0
+                          @log.debug "New AI #1: Trying to change the angle as much as possible"
+                        end
+                      end
+                    else
+                    end
 
                     @hit_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * used_power
                     if ( dirX < 0 )
