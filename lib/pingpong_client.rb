@@ -915,16 +915,16 @@ module Pingpong
                     # we should try to move the paddle so that we get maximum angle
                     # change.
                     #                    
-                    if @last_avg_velocity > 0.40 and (@last_enter_angle-90).abs > 40
-                      if p.y > @config.arenaHeight - @config.arenaHeight / 4
-                        # ball is going to hit at bottom 1/4
+                    if @last_avg_velocity > 0.30 and (@last_enter_angle-90).abs > 30
+                      if p.y > @config.arenaHeight - @config.arenaHeight / 4 and @enemyPaddle.y < @config.arenaHeight / 4
+                        # ball is going to hit at bottom 1/4 and opponent is at top
                         if p.dy > 0
                           # Ball is going down, we should try to aim at max up paddle
                           used_power = -1.0
                           @log.debug "New AI #1: Trying to change the angle as much as possible"
                         end
-                      elsif p.y < @config.arenaHeight / 4
-                        # ball is going to hit at top 1/4
+                      elsif p.y < @config.arenaHeight / 4 and @enemyPaddle.y > @config.arenaHeight - @config.arenaHeight / 4
+                        # ball is going to hit at top 1/4 and opponent is at bottom
                         if p.dy < 0
                           # Ball is going up, we should try to aim at max down paddle
                           used_power = 1.0
