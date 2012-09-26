@@ -1,3 +1,5 @@
+#encoding: utf-8
+
 #
 #     _/_/_/_/  _/                                      _/
 #    _/            _/_/_/      _/_/_/    _/_/      _/_/_/  _/  _/_/
@@ -33,12 +35,9 @@ require 'fileutils'
 # added libraries
 require 'time'
 require 'date'
-require 'thread'
 require 'launchy' if $DEBUG
 require 'benchmark' if $DEBUG
-require_relative 'simulation'
 require_relative 'helpers'
-
 
 module Pingpong
 
@@ -46,21 +45,26 @@ module Pingpong
 
     def initialize(player_name, server_host, server_port, other_name = nil)
 
+      @log = Helpers::Log.new
+
+      @message_queue = []
+
       # banner
       show_banner
 
       # log initialize parameters
       if other_name.nil?
-        Helpers::Log::write "initialize(#{player_name}, #{server_host}, #{server_port})"
+        @log.write "initialize(#{player_name}, #{server_host}, #{server_port})"
       else
-        Helpers::Log::write "initialize(#{player_name}, #{server_host}, #{server_port}, #{other_name})"
+        @log.write "initialize(#{player_name}, #{server_host}, #{server_port}, #{other_name})"
       end
       
       # Initialize global classes
       @config = Helpers::Configuration.new()
-      @ownPaddle = Helpers::Object::Paddle.new
-      @enemyPaddle = Helpers::Object::Paddle.new
-      @ball = Helpers::Object::Ball.new
+      @ownPaddle = Helpers::Paddle.new
+      @enemyPaddle = Helpers::Paddle.new
+      @ball = Helpers::Ball.new
+      @math = Helpers::Math.new
       @scores = Hash.new
 
       @player_name = player_name
@@ -68,19 +72,13 @@ module Pingpong
       @total_rounds = 0
       @win_count = 0
       @lose_count = 0
+      @MAX_MESSAGES_IN_QUEUE = 20 # 20 messages per 2 second
+      @MAX_QUEUE_TOTAL_TIME = 2.0 # 2 seconds
 
       # testmode settings
       @test_offset_cur = -1.0
       @test_offset_add = 0.05
       @test_in_progress = false
-
-      # Initialize simulation
-      #@Simulation = Simulation::CSimulation.new
-      @Simulation = Simulation::CSimulation.new @config
-      @running = true
-
-      # Start threads
-      @simulation_thread_handle = Thread.new{simulation_thread()}
 
       reset_round
 
@@ -97,11 +95,12 @@ module Pingpong
 
     def reset_round
       # Set starting values      
+      @last_sent_message = nil
       @server_time = nil
       @server_time_elapsed = 0
       @server_time_delta = nil
       @fixed_server_time = nil
-      @fixed_server_rate = 1000/10 # TODO: this should be calculated from last full three movement updates instead
+      @fixed_server_rate = 1000/30 # TODO: this should be calculated from last full three movement updates instead
       @fixed_server_time_elapsed = 0
       @fixed_server_time_delta = nil
       @local_time = get_localtimestamp
@@ -110,8 +109,6 @@ module Pingpong
       @local_vs_server_delta = nil
       @local_vs_server_drift = 0
 
-      @last_sent_message = nil
-
       # last updated timestamps
       @updatedLastTimestamp = 0
       @updatedDeltaTime = 0
@@ -119,7 +116,6 @@ module Pingpong
 
       # testmode settings
       @test_mode = 0 # 0 = off, 1 = test different offset powers
-      @test_skip_update_counter = 0
 
       # AI settings
       @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
@@ -152,6 +148,8 @@ module Pingpong
       @last_target_ymin = 0
       @last_target_ymax = 0
       @last_target_opponent_y = 0
+      @last_target_own_y = 0
+      @current_target_y = -1
 
       # default configuration
       # will be updated from the gameIsOn server message
@@ -168,7 +166,7 @@ module Pingpong
       @total_rounds += 1
 
       # temp
-      @wanted_y = 240+25
+      @wanted_y = 240
       @old_wanted_y = @wanted_y
       @passed_wanted_y = false
       @show_json = true
@@ -176,84 +174,19 @@ module Pingpong
     end
 
     def duel(player_name, other_name, tcp)
-      Helpers::Log::write "> duel(#{player_name} vs #{other_name})"
-      tcp.puts duel_message(player_name, other_name)
+      @log.write "> duel(#{player_name} vs #{other_name})"
+      SendMessage tcp, duel_message(player_name, other_name)
       react_to_messages_from_server tcp
-      #main_loop tcp
     end
 
     def play(player_name, tcp)
-      Helpers::Log::write "> join(#{player_name})"
-      tcp.puts join_message(player_name)
+      @log.write "> join(#{player_name})"
+      SendMessage tcp, join_message(player_name)
       react_to_messages_from_server tcp
-      #main_loop tcp
-    end
-
-    # Thread: Simulation handler
-    def simulation_thread
-      fps = 30
-      start_time = Time.now.to_f * 1000.0
-      tick = 1000/fps
-      last_update = start_time
-      next_tick = start_time + tick
-
-      dirX = -1
-
-      while @running
-
-        cur_time = Time.now.to_f * 1000
-        delta_time = cur_time - last_update
-
-        str = ""
-        if @Simulation.count > 0
-          state = @Simulation.clone_current_state
-          if not state.nil?
-            str = sprintf "B:%-3.2f %-3.2f PL:%-3.2f PR:%-3.2f", state.ball.x, state.ball.y, state.ownPaddle.y, state.opponentPaddle.y
-          end
-        end
-
-        last_update = cur_time
-        # get the elapsed time
-        elapsed_time = cur_time - start_time 
-        Helpers::Log::debug1 "\r#{str}        \r"
-        #Helpers::Log::debug "#{str}"
-
-        # calculate when the next tick should start
-        next_tick = elapsed_time + tick
-
-        # calculate how many milliseconds we should sleep
-        # to get to the next tick
-        time_left = next_tick - (Time.now.to_f * 1000 - start_time)
-        next_tick = start_time + elapsed_time + tick
-        if time_left > 0
-          sleep time_left/1000.0
-        else
-          sleep 0.0001
-        end
-        #next_tick += delta_time
-        @Simulation.update delta_time
-
-      end
-
-    end
-
-    def main_loop(tcp)
-      # loop forever
-      while true
-        Helpers::Log::debug1 "\r #{Time.now.to_f}   \r"
-        begin
-          msg = tcp.recvmsg_nonblock(4096)
-          Helpers::Log::debug "Received data from socket: < #{msg[0]}"
-        rescue
-          Helpers::Log::debug "Exception raised!"
-        end
-      end
-
     end
 
     def react_to_messages_from_server(tcp)
       while json = tcp.gets
-        #sleep(0.001)
         message = JSON.parse(json)
         begin
           msgtype = message['msgType']
@@ -263,12 +196,12 @@ module Pingpong
         case msgtype
 
           when 'joined'
-            Helpers::Log::write "< joined: #{json}"
+            @log.write "< joined: #{json}"
             $stdout.flush
             Launchy.open(message['data']) if $DEBUG
 
           when 'gameStarted'
-            Helpers::Log::write "< gameStarted: #{json}"
+            @log.write "< gameStarted: #{json}"
             $stdout.flush
 
           when 'gameIsOn'
@@ -277,11 +210,11 @@ module Pingpong
             @local_time = get_localtimestamp
 
             if $DEBUG
-              Helpers::Log::write "< gameIsOn: lag:#{@local_vs_server_drift} #{json}"
+              @log.write "< gameIsOn: lag:#{@local_vs_server_drift} #{json}"
             else
               if @show_json
                 @show_json = false
-                Helpers::Log::write "< gameIsOn: lag:#{@local_vs_server_drift} #{json}"
+                @log.write "< gameIsOn: lag:#{@local_vs_server_drift} #{json}"
               end
             end
 
@@ -310,7 +243,7 @@ module Pingpong
             end
 
             # debug output to compare server and fixed timesteps
-            #Helpers::Log::debug "S: #{@server_time} L: #{@local_time} D: #{(@local_time-@server_time)-@local_vs_server_delta}"
+            #@log.debug "S: #{@server_time} L: #{@local_time} D: #{(@local_time-@server_time)-@local_vs_server_delta}"
             @local_vs_server_drift = (@local_time-@server_time)-@local_vs_server_delta
 
             # update ball information from json packet
@@ -318,7 +251,7 @@ module Pingpong
               msg_ball = msg['ball']
               @ball.set_position( Float(msg_ball['pos']['x']), Float(msg_ball['pos']['y']) )
             rescue
-              Helpers::Log::write "Warning: Ball block missing from json packet"
+              @log.write "Warning: Ball block missing from json packet"
               # we don't know where the ball is, stop simulating
             end
 
@@ -334,7 +267,7 @@ module Pingpong
               end
               @hit_offset_max = h
             rescue
-              Helpers::Log::write "Warning: Configuration block missing from json packet"
+              @log.write "Warning: Configuration block missing from json packet"
             end
 
             # update player information from json packet
@@ -345,22 +278,14 @@ module Pingpong
               @ownPaddle.set_position( 0, Float(msg_own['y']) + @config.paddleHeight/2 )
               @enemyPaddle.set_position( @config.arenaWidth, Float(msg_enemy['y']) + @config.paddleHeight/2 )
             rescue
-              Helpers::Log::write "Warning: Player block missing from json packet"
+              @log.write "Warning: Player block missing from json packet"
             end
-
-            #@test_skip_update_counter += 1
-            #if @test_skip_update_counter > 10
-              @Simulation.add_state @ball.x, @ball.y, @ownPaddle.y, @enemyPaddle.y
-            #  @test_skip_update_counter = 0
-            #end
-
-            #Helpers::Log::debug "Simulation states : #{@Simulation.count}"
 
             if not $DEBUG
               if @test_mode == 0
                 str = sprintf "L:%d B:%.2f %.2f P:%.2f,%.2f C:%d %d %d %d %d", @local_vs_server_drift, @ball.x, @ball.y, @ownPaddle.y, @enemyPaddle.y, @config.ballRadius, @config.paddleWidth, @config.paddleHeight, @config.arenaWidth, @config.arenaHeight
                 #@local_vs_server_drift} Ball:#{Integer(@ball.x)},#{Integer(@ball.y)},#{@config.ballRadius} Paddles:#{Integer(@ownPaddle.y)},#{Integer(@enemyPaddle.y)},#{@config.paddleWidth},#{@config.paddleHeight} Arena:#{@config.arenaWidth},#{@config.arenaHeight}
-                Helpers::Log::write "< gameIsOn: #{str}"
+                @log.write "< gameIsOn: #{str}"
               end
             end
 
@@ -395,7 +320,7 @@ module Pingpong
             if not @ball.x2.nil? and not @ball.x3.nil?
 
               # Case #1 - All points are on the same line
-              if Helpers::Math::on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+              if @math.on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
 
                 # ============================================================
                 # No collision detected, all three points are on the same line
@@ -416,15 +341,15 @@ module Pingpong
                   when 0
 
                     # Check if P1 is not on the same line with P2 and P3
-                    if not Helpers::Math::is_p1_on_the_same_p2p3_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+                    if not @math.is_p1_on_the_same_p2p3_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
 
                       # ============================================================
                       # COLLISION CASE #1: P1 is not on the same line as P2 and P3
                       # ============================================================
                       @last_bounce_state = 1
 
-                      Helpers::Log::write "Info: COLLISION CASE #1: P1 is not on the same line as P2 and P3" if @test_mode == 0
-                      #Helpers::Log::debug "COLLISION CASE #1: P1 is not on the same line as P2 and P3"
+                      @log.write "Info: COLLISION CASE #1: P1 is not on the same line as P2 and P3" if @test_mode == 0
+                      #@log.debug "COLLISION CASE #1: P1 is not on the same line as P2 and P3"
                       # find the collision point using the current velocity
                       # Note: Can collide with any surface
                       deltaX = x2-x3
@@ -435,7 +360,7 @@ module Pingpong
                         y = @config.arenaHeight - @config.ballRadius - 1
                       end
                       # calculate what x-coordinate the ball is going to hit
-                      x = Helpers::Math::calculate_collision(y, x2, y2, x3, y3)
+                      x = @math.calculate_collision(y, x2, y2, x3, y3)
                       if x <= @config.paddleWidth + @config.ballRadius
                         # collision with left paddle
                         #if rand(2) == 0
@@ -444,13 +369,13 @@ module Pingpong
                         #  @AI_level = 1.0
                         #end
                         #x = @config.paddleWidth + @config.ballRadius
-                        #y = Helpers::Math::calculate_collision(x, y2, x2, y3, x3)
+                        #y = @math.calculate_collision(x, y2, x2, y3, x3)
                         @ball.x2 = x1 + deltaX
                         @ball.y2 = y1 - deltaY
                       elsif x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                         # collision with right paddle
                         #x = @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
-                        #y = Helpers::Math::calculate_collision(x, y2, x2, y3, x3)
+                        #y = @math.calculate_collision(x, y2, x2, y3, x3)
                         @ball.x2 = x1 + deltaX
                       else
                         # collision with arena edges
@@ -463,20 +388,20 @@ module Pingpong
 
                     else
                       @last_bounce_state = 0
-                      Helpers::Log::write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!" if @test_mode == 0
+                      @log.write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!" if @test_mode == 0
                     end
 
                   when 1
 
                     # Check if P3 is not on the same line with P1 and P2
-                    if not Helpers::Math::is_p3_on_the_same_p1p2_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+                    if not @math.is_p3_on_the_same_p1p2_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
 
                       # ==========================================================
                       # COLLISION CASE #2: P3 is not on the same line as P1 and P2
                       # ==========================================================
                       @last_bounce_state = 2
 
-                      Helpers::Log::write "Info: COLLISION CASE #2: P3 is not on the same line as P1 and P2" if @test_mode == 0
+                      @log.write "Info: COLLISION CASE #2: P3 is not on the same line as P1 and P2" if @test_mode == 0
                       # the last known point is not on the new line
                       # so we can just use the current point and
                       # previous position for velocity and heading
@@ -486,7 +411,7 @@ module Pingpong
 
                     else
                       @last_bounce_state = 0
-                      Helpers::Log::write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!" if @test_mode == 0
+                      @log.write "Info: COLLISION CASE #3: Unknown collision state, all points are at the same line!" if @test_mode == 0
                     end
 
                 end #/ case
@@ -512,7 +437,7 @@ module Pingpong
               last_deltaX = @ball.x-@ball.x2
               last_deltaY = @ball.y-@ball.y2
               velocity = Math.hypot( last_deltaX, last_deltaY ) / @server_time_delta
-              #Helpers::Log::write "#{@ball.x2},#{@ball.y2} to #{@ball.x},#{@ball.y} = #{last_deltaX},#{last_deltaY} => #{@last_velocity}"
+              #@log.write "#{@ball.x2},#{@ball.y2} to #{@ball.x},#{@ball.y} = #{last_deltaX},#{last_deltaY} => #{@last_velocity}"
               # calculate average velocity
               if not @last_velocity.nil?
                 @last_avg_velocity = (@last_velocity + velocity) / 2
@@ -523,7 +448,7 @@ module Pingpong
                 else
                   @max_velocity = @last_avg_velocity
                 end
-                #Helpers::Log::debug "#{@last_velocity} + #{velocity} / 2 = #{@last_avg_velocity} (max = #{@max_velocity})"
+                #@log.debug "#{@last_velocity} + #{velocity} / 2 = #{@last_avg_velocity} (max = #{@max_velocity})"
               else
                 @last_avg_velocity = nil
               end
@@ -579,7 +504,7 @@ module Pingpong
               #@paddle_slowdown_power = 0.5 if @paddle_slowdown_power < 0.5
               #@paddle_slowdown_power -= 0.5
               #@paddle_slowdown_power *= 2
-              #Helpers::Log::debug "Paddle slowdown power: #{@paddle_slowdown_power}"
+              #@log.debug "Paddle slowdown power: #{@paddle_slowdown_power}"
               #
               # ---- /TODO
 
@@ -598,11 +523,11 @@ module Pingpong
             end                
 
             if @hit_offset_power != @old_offset_power
-              #Helpers::Log::debug "Offset power now at #{@hit_offset_power} (max velocity #{@max_velocity}"
+              #@log.debug "Offset power now at #{@hit_offset_power} (max velocity #{@max_velocity}"
               @old_offset_power = @hit_offset_power
             end
 
-            #Helpers::Log::write "Info: Server time delta = #{@server_time_delta} (fixed rate = #{@fixed_server_rate}" if $DEBUG
+            #@log.write "Info: Server time delta = #{@server_time_delta} (fixed rate = #{@fixed_server_rate}" if $DEBUG
 
             #----------------------------------------------
             #
@@ -647,7 +572,7 @@ module Pingpong
 
             distance_to_player = 0
             distance_to_enemy = 0
-            if not @ball.x2.nil? and not @ball.x3.nil? and Helpers::Math::on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
+            if not @ball.x2.nil? and not @ball.x3.nil? and @math.on_the_same_line( @ball.x, @ball.y, @ball.x2, @ball.y2, @ball.x3, @ball.y3 )
 
               x2 = @ball.x2
               y2 = @ball.y2
@@ -669,7 +594,7 @@ module Pingpong
                   if not x2.nil?
 
                     if @test_in_progress
-                      Helpers::Log::debug "TESTMODE1: Completed one pass (offset = #{@test_offset_cur}"
+                      @log.debug "TESTMODE1: Completed one pass (offset = #{@test_offset_cur}"
                       @test_in_progress = false
                       @test_offset_cur += @test_offset_add
                       if @test_offset_cur > 1.0
@@ -677,33 +602,33 @@ module Pingpong
                       end
                     end
                     @block_count += 1
-                    @last_exit_angle = Helpers::Math::calculate_line_angle( @ball.x2, @ball.y2, @ball.x, @ball.y )
-                    #Helpers::Log::write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
+                    @last_exit_angle = @math.calculate_line_angle( @ball.x2, @ball.y2, @ball.x, @ball.y )
+                    #@log.write "Info: Last enter angle was #{@last_enter_angle} and exit angle is now #{@last_exit_angle}" if $DEBUG
                     # check deviation from normal bounce angle
                     expected_exit_angle = 180 - @last_enter_angle
                     @last_deviation = @last_exit_angle - expected_exit_angle
                     if @last_enter_angle <= 90
-                      #Helpers::Log::write "Info: Deviation from <90 to normal exit angle = #{@last_deviation}" if $DEBUG
+                      #@log.write "Info: Deviation from <90 to normal exit angle = #{@last_deviation}" if $DEBUG
                     else
-                      #Helpers::Log::write "Info: Deviation from >90 to normal exit angle = #{@last_deviation}" if $DEBUG
+                      #@log.write "Info: Deviation from >90 to normal exit angle = #{@last_deviation}" if $DEBUG
                     end
 
                     # we have changed direction, if the paddle was stationary
                     # we should look at the last own enter and exit angles
                     # and also the last calculated collision point
-                    if Helpers::Math::is_close_to @ownPaddle.y, @ownPaddle.y2, 0.1
+                    if @math.is_close_to @ownPaddle.y, @ownPaddle.y2, 0.1
                       if (@last_enter_point-@ownPaddle.y2).abs < @config.paddleHeight/2
-                        Helpers::Log::debug "TEST RESULTS: #{(@last_enter_point-@ownPaddle.y2).abs}, #{@last_avg_velocity}, #{(@last_deviation).abs}" if $DEBUG and @test_mode == 1
-                        Helpers::Log::write "TEST_RESULTS: #{@last_enter_point-@ownPaddle.y2}, #{@last_avg_velocity}, #{@last_deviation}"
-                        #Helpers::Log::debug "=======================================================" if $DEBUG
-                        #Helpers::Log::debug "== Avg velocity   : #{@last_avg_velocity}" if $DEBUG
-                        #Helpers::Log::debug "== Paddle Y       : #{@ownPaddle.y2}" if $DEBUG
-                        #Helpers::Log::debug "== Ball Hit Y     : #{@last_enter_point}" if $DEBUG
-                        #Helpers::Log::debug "== Offset         : #{@last_enter_point-@ownPaddle.y2}" if $DEBUG
-                        #Helpers::Log::debug "== Enter angle    : #{@last_enter_angle}" if $DEBUG
-                        #Helpers::Log::debug "== Exit angle     : #{@last_exit_angle} (Expected: #{expected_exit_angle})" if $DEBUG
-                        #Helpers::Log::debug "== Angle modifier : #{@last_deviation}" if $DEBUG
-                        #Helpers::Log::debug "=======================================================" if $DEBUG
+                        @log.debug "TEST RESULTS: #{(@last_enter_point-@ownPaddle.y2).abs}, #{@last_avg_velocity}, #{(@last_deviation).abs}" if $DEBUG and @test_mode == 1
+                        @log.write "TEST_RESULTS: #{@last_enter_point-@ownPaddle.y2}, #{@last_avg_velocity}, #{@last_deviation}"
+                        #@log.debug "=======================================================" if $DEBUG
+                        #@log.debug "== Avg velocity   : #{@last_avg_velocity}" if $DEBUG
+                        #@log.debug "== Paddle Y       : #{@ownPaddle.y2}" if $DEBUG
+                        #@log.debug "== Ball Hit Y     : #{@last_enter_point}" if $DEBUG
+                        #@log.debug "== Offset         : #{@last_enter_point-@ownPaddle.y2}" if $DEBUG
+                        #@log.debug "== Enter angle    : #{@last_enter_angle}" if $DEBUG
+                        #@log.debug "== Exit angle     : #{@last_exit_angle} (Expected: #{expected_exit_angle})" if $DEBUG
+                        #@log.debug "== Angle modifier : #{@last_deviation}" if $DEBUG
+                        #@log.debug "=======================================================" if $DEBUG
                       end
                     end
 
@@ -713,7 +638,7 @@ module Pingpong
               end
 
               # try to solve
-              solve_results = Helpers::Math::solve_collisions x1, y1, x2, y2, @config, @max_iterations
+              solve_results = @math.solve_collisions x1, y1, x2, y2, @config, @max_iterations
               iterations = 0
               distance_to_player = 0
               distance_to_enemy = 0
@@ -731,23 +656,26 @@ module Pingpong
                 # @enemyPaddle.set_target(p.y)
                 if not @last_target_result.nil?
                   temp_result = @last_target_result[1]
-                  #Helpers::Log::debug "---------------------------------------------" if $DEBUG
-                  #Helpers::Log::debug "Enter Angle was : #{@last_enter_angle}" if $DEBUG
-                  #Helpers::Log::debug "Exit Angle was  : #{180-@last_enter_angle} (calculated)" if $DEBUG
-                  #Helpers::Log::debug "Exit Angle was  : #{@last_exit_angle} (actual)" if $DEBUG
-                  #Helpers::Log::debug "Exit Angle was  : #{temp_result["angle"]} (wanted)" if $DEBUG
-                  #Helpers::Log::debug "Exit Angle DIFF : #{@last_exit_angle-(180-@last_enter_angle)} (actual)" if $DEBUG
-                  #Helpers::Log::debug "Exit Angle DIFF : #{Helpers::Math::top_secret_formula temp_result["offset"]} (wanted)" if $DEBUG
-                  #Helpers::Log::debug "Exit Angle ERROR: #{(@last_exit_angle-(180-@last_enter_angle))-(Helpers::Math::top_secret_formula temp_result["offset"])}" if $DEBUG
-                  #Helpers::Log::debug "Used Offset was : #{temp_result["offset"]}" if $DEBUG
-                  #Helpers::Log::debug "Used Power was  : #{temp_result["power"]}" if $DEBUG
-                  #Helpers::Log::debug "Opponent-y was  : #{@last_target_opponent_y}" if $DEBUG
-                  #Helpers::Log::debug "Target          : @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}" if $DEBUG
-                  #Helpers::Log::debug "Target min/max  : @ #{@last_target_ymin} | #{@last_target_ymax}" if $DEBUG
+                  @log.debug "---------------------------------------------" if $DEBUG
+                  @log.debug "Enter Angle was : #{@last_enter_angle}" if $DEBUG
+                  @log.debug "Exit Angle was  : #{180-@last_enter_angle} (calculated)" if $DEBUG
+                  @log.debug "Exit Angle was  : #{@last_exit_angle} (actual)" if $DEBUG
+                  @log.debug "Exit Angle was  : #{temp_result["angle"]} (wanted)" if $DEBUG
+                  @log.debug "Exit Angle DIFF : #{@last_exit_angle-(180-@last_enter_angle)} (actual)" if $DEBUG
+                  @log.debug "Exit Angle DIFF : #{@math.top_secret_formula temp_result["offset"]} (wanted)" if $DEBUG
+                  @log.debug "Exit Angle ERROR: #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}" if $DEBUG
+                  @log.debug "Used Offset was : #{temp_result["offset"]}" if $DEBUG
+                  @log.debug "Used Power was  : #{temp_result["power"]}" if $DEBUG
+                  @log.debug "Opponent-y was  : #{@last_target_opponent_y}" if $DEBUG
+                  @log.debug "Target          : @ #{@last_target_y} | Real: @ #{p.y} | Diff: #{@last_target_y-p.y}" if $DEBUG
+                  @log.debug "Target min/max  : @ #{@last_target_ymin} | #{@last_target_ymax}" if $DEBUG
+                  @log.debug "Target own-y    : @ #{@last_target_own_y}" if $DEBUG
+                  @log.debug "Last Paddle V   : #{@ownPaddle.dy}" if $DEBUG
+                  @log.debug "Last command    : #{@last_sent_message}" if $DEBUG
                   #@last_target_results.each { |key, value| 
-                  #  Helpers::Log::debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}" if $DEBUG
+                  #  @log.debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}" if $DEBUG
                   #}
-                  #Helpers::Log::write "TARGET_RESULTS: #{@last_avg_velocity}, #{temp_result["offset"]}, #{@last_exit_angle-(180-@last_enter_angle)}, #{Helpers::Math::top_secret_formula temp_result["offset"]}, #{(@last_exit_angle-(180-@last_enter_angle))-(Helpers::Math::top_secret_formula temp_result["offset"])}"
+                  @log.write "TARGET_RESULTS: #{@ownPaddle.dy}, #{@last_avg_velocity}, #{temp_result["offset"]}, #{@last_exit_angle-(180-@last_enter_angle)}, #{@math.top_secret_formula temp_result["offset"]}, #{(@last_exit_angle-(180-@last_enter_angle))-(@math.top_secret_formula temp_result["offset"])}"
                   @last_target_result = nil
                 end
 
@@ -756,16 +684,16 @@ module Pingpong
                 # at the opponent side
                 estimated_enemy_y = @enemyPaddle.y - (@enemyPaddle.avg_dy * (time_to_enemy/100))
                 enemy_offset = -(estimated_enemy_y-p.y)
-                enemy_offset = -22 if enemy_offset < -22
-                enemy_offset = 22 if enemy_offset > 22
-                #Helpers::Log::debug "Est: #{estimated_enemy_y} | Offset: #{enemy_offset} | Diff: #{estimated_enemy_y-@enemyPaddle.y} | "
+                enemy_offset = -23 if enemy_offset < -23
+                enemy_offset = 23 if enemy_offset > 23
+                #@log.debug "Est: #{estimated_enemy_y} | Offset: #{enemy_offset} | Diff: #{estimated_enemy_y-@enemyPaddle.y} | "
 
                 #if not @enemyPaddle.avg_dy.nil?
-                #  Helpers::Log::debug "Opponent paddle @ #{@enemyPaddle.y}, Velocity #{@enemyPaddle.avg_dy}"
+                #  @log.debug "Opponent paddle @ #{@enemyPaddle.y}, Velocity #{@enemyPaddle.avg_dy}"
                 #end
 
                 # calculate current angle
-                @last_enemy_enter_angle = Helpers::Math::calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
+                @last_enemy_enter_angle = @math.calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
                 
                 # bounce back and simulate again
                 #x2 = p.x + p.dx
@@ -773,10 +701,10 @@ module Pingpong
                 #x1 = p.x
                 #y1 = p.y
 
-                exit_vector = Helpers::Math::Vector2.new p.x, p.y, p.dx, -p.dy
-                exit_vector.rotate Helpers::Math::top_secret_formula enemy_offset
+                exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, -p.dy
+                exit_vector.rotate @math.top_secret_formula enemy_offset
 
-                solve_results = Helpers::Math::solve_collisions exit_vector.x, exit_vector.y, exit_vector.x+exit_vector.dx, exit_vector.y+exit_vector.dy, @config, @max_iterations
+                solve_results = @math.solve_collisions exit_vector.x, exit_vector.y, exit_vector.x+exit_vector.dx, exit_vector.y+exit_vector.dy, @config, @max_iterations
                 p = solve_results.point
               end
 
@@ -784,14 +712,14 @@ module Pingpong
                 # hit at our paddle
                 iterations += solve_results.iterations
                 distance_to_player += solve_results.distance
-                @last_enter_angle = Helpers::Math::calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
+                @last_enter_angle = @math.calculate_line_angle( p.x+p.dx, p.y+p.dy, p.x, p.y )
                 @last_enter_point = p.y
 
-                #Helpers::Log::debug "< Enter angle = #{@last_enter_angle}"
+                #@log.debug "< Enter angle = #{@last_enter_angle}"
 
                 # scale hit_offset depending on the estimated enter angle
                 # safe angles are -25 .. +25 and anything over that should decrement the power
-                offset_cut_value = Helpers::Math::angle_to_hit_offset_cut @last_enter_angle, 7
+                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, 6
 
                 # set the offset top and bottom max values
                 @hit_offset_top = -@hit_offset_max
@@ -807,10 +735,10 @@ module Pingpong
                 @hit_offset_top_powerlimit = (Float(@hit_offset_top) / Float(@hit_offset_max)) #* @hit_offset_power
                 @hit_offset_bottom_powerlimit = (Float(@hit_offset_bottom) / Float(@hit_offset_max)) #* @hit_offset_power
 
-                #Helpers::Log::debug "Offset P: #{@hit_offset_top_powerlimit}, #{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}] < #{@hit_offset_power}"
+                #@log.debug "Offset P: #{@hit_offset_top_powerlimit}, #{@hit_offset_bottom_powerlimit} [#{@hit_offset_top}, #{@hit_offset_bottom}] < #{@hit_offset_power}"
 
                 #@hit_offset_power *= angle_hit_offset_power
-                #Helpers::Log::debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
+                #@log.debug "#{angle_hit_offset_power} => #{@hit_offset_power}"
 
                 temp_AI_level = @AI_level
 
@@ -841,7 +769,7 @@ module Pingpong
                   if @test_mode == 1
                     if @last_enter_angle >= 90-0.5 and @last_enter_angle <= 90+0.5
                       if not @test_in_progress
-                        Helpers::Log::debug "TESTMODE1: Activated for next pass"
+                        @log.debug "TESTMODE1: Activated for next pass"
                         @test_in_progress = true
                       end
                       offset_temp_max = @config.paddleHeight/2
@@ -867,51 +795,30 @@ module Pingpong
                     # allow "switch" sides only if our distance to ball is more than 300 pixels
                     if @enemyPaddle.y < @config.arenaHeight / 2
                       @opponent_best_target = @config.arenaHeight - 1
-                      #Helpers::Log::debug "DOWN"
+                      #@log.debug "DOWN"
                     else
                       @opponent_best_target = 0
-                      #Helpers::Log::debug "UP"
+                      #@log.debug "UP"
                     end
                   end
 
                   # lets first simulate where the opponent is going to try to be
-                  exit_vector = Helpers::Math::Vector2.new p.x, p.y, p.dx, p.dy
+                  exit_vector = Helpers::Vector2.new p.x, p.y, p.dx, p.dy
                   test_vector = exit_vector.dup
-                  opponent_location = Helpers::Math::solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
+                  opponent_location = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y+test_vector.dy, @config, @max_iterations
                   p2 = opponent_location.point
                   if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                     @enemyPaddle.set_target p2.y
-                    #Helpers::Log::debug "Enemy is going to #{@enemyPaddle.target_y}"
+                    #@log.debug "Enemy is going to #{@enemyPaddle.target_y}"
                   else
                     # can't simulate, maybe too much bounces right now
                     @enemyPaddle.set_target @opponent_best_target
                   end
 
-                  #Helpers::Log::debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
-                  #
-                  # Now that we know the best target of opportunity location
-                  # we should calculate what is the best way to get to there
-                  # since we do not know the secret formula behind the
-                  # paddle physics we need to guess it.
-                  #
-                  # We can however estimate how much we can affect to
-                  # the ball velocity using the offsets and from estimations
-                  # we can create model for calculating offsets depending
-                  # on the wanted target positions
-                  #
-                  # TODO: Gather data when the paddle is stationary and gets hit
-                  #       from different angles. We need to know the exit angles
-                  #       or the angle differences from normal vectors.
-                  #
-                  # Lets simulate seven different positions and estimated velocities
-                  # - 100%
-                  # - 50%
-                  # = 0%
-                  # + 50%
-                  # + 100%
-                  #
+                  #@log.debug "Opp-y = #{@enemyPaddle.y} | Best target = #{opponent_best_target}" if $DEBUG
+
                   @start_power = @hit_offset_top_powerlimit
-                  @power_add = 0.025
+                  @power_add = 0.020
                   @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
@@ -924,19 +831,19 @@ module Pingpong
 
                     test_vector = exit_vector.dup
                     test_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * cur_power
-                    angle_change = Helpers::Math::top_secret_formula test_offset
+                    angle_change = @math.top_secret_formula test_offset
                     test_vector.rotate angle_change
-                    final_angle = Helpers::Math::calculate_line_angle test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, test_vector.x, test_vector.y 
+                    final_angle = @math.calculate_line_angle test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, test_vector.x, test_vector.y 
 
                     # try to solve
-                    solve_results = Helpers::Math::solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, @config, @max_iterations
+                    solve_results = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, @config, @max_iterations
                     p2 = solve_results.point
                     distance_back = solve_results.distance
                     if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                       # we got result
                       # bounce back to us
-                      test_vector2 = Helpers::Math::Vector2.new p2.x, p2.y, p2.x-p2.dx, p2.y+p2.dy
-                      solve_results2 = Helpers::Math::solve_collisions test_vector2.x, test_vector2.y, test_vector2.x+test_vector2.dx, test_vector2.y-test_vector2.dy, @config, @max_iterations
+                      test_vector2 = Helpers::Vector2.new p2.x, p2.y, p2.x-p2.dx, p2.y+p2.dy
+                      solve_results2 = @math.solve_collisions test_vector2.x, test_vector2.y, test_vector2.x+test_vector2.dx, test_vector2.y-test_vector2.dy, @config, @max_iterations
                       p3 = solve_results2.point
                       distance_back += solve_results2.distance
 
@@ -947,42 +854,48 @@ module Pingpong
                       # If we are near the edges and the incoming angle is less than 45
                       # degrees we should try to aim the bottom to force the opponent
                       # to move closer
-                      if @ownPaddle.y < @config.arenaHeight/4.5
-                        @opponent_best_target = 0
-                      elsif @ownPaddle.y > @config.arenaHeight - @config.arenaHeight/4.5
-                        @opponent_best_target = @config.arenaHeight-1
-                      end
+                      at_edge = false
 
-                      # We should set the best target away from us towards the center
-                      max_movement_amount = (distance_back / @last_avg_velocity) / 10.0
-
-                      if @ownPaddle.y < @config.arenaHeight
-                        # go towards the center (down)
-                        target_y = @ownPaddle.y + max_movement_amount
-                        target_y = @config.arenaHeight / 2 if target_y >= @config.arenaHeight / 2
-                      else
-                        # go towards the center (up)
-                        target_y = @ownPaddle.y - max_movement_amount
-                        target_y = @config.arenaHeight / 2 if target_y <= @config.arenaHeight / 2
+                      if (@last_enter_angle-90).abs < 30 
+                        if @ownPaddle.y < @config.arenaHeight/4.5
+                          #@log.debug "Corner situation up!"
+                          @opponent_best_target = @config.ballRadius
+                          at_edge = true
+                        elsif @ownPaddle.y > @config.arenaHeight - @config.arenaHeight/4.5
+                          @opponent_best_target = @config.arenaHeight-1 - @config.ballRadius
+                          #@log.debug "Corner situation down!"
+                          at_edge = true
+                        end
                       end
 
                       #if paddle_time_to_ball < ball_time_to_paddle
                         # we can make it, keep the result
-                        #Helpers::Log::debug "Simulated back to us at #{p3.y}, Btime: #{ball_time_to_paddle}, Pd: #{distance_to_paddle}, Ptime: #{paddle_time_to_ball}"
+                        #@log.debug "Simulated back to us at #{p3.y}, Btime: #{ball_time_to_paddle}, Pd: #{distance_to_paddle}, Ptime: #{paddle_time_to_ball}"
 
                         # calculate which result would be the best
                         # TODO: use the target_y and current y to figure out where we should aim...
-                        result_score = (p2.y - @opponent_best_target).abs.to_i
-                        result = {}
-                        result["offset"] = test_offset
-                        result["angle"] = final_angle
-                        result["power"] = cur_power
-                        result["target-y"] = p2.y
-                        @last_target_ymin = p2.y if p2.y < @last_target_ymin
-                        @last_target_ymax = p2.y if p2.y > @last_target_ymax
-                        result["own-y"] = p3.y
-                        result["iterations"] = solve_results.iterations
-                        @simulations[result_score] = result
+                        result_score = nil
+                        if at_edge
+                          result_score = (p2.y - @opponent_best_target).abs.to_i
+                          #if paddle_time_to_ball > ball_time_to_paddle
+                          #  result_score = nil
+                          #end
+                        else
+                          result_score = (p2.y - @opponent_best_target).abs.to_i
+                        end
+                        if not result_score.nil?
+                          result = {}
+                          result["paddle_to_ball"] = paddle_time_to_ball
+                          result["offset"] = test_offset
+                          result["angle"] = final_angle
+                          result["power"] = cur_power
+                          result["target-y"] = p2.y
+                          @last_target_ymin = p2.y if p2.y < @last_target_ymin
+                          @last_target_ymax = p2.y if p2.y > @last_target_ymax
+                          result["own-y"] = p3.y
+                          result["iterations"] = solve_results.iterations
+                          @simulations[result_score] = result
+                        end
                       #end
 
                     end
@@ -991,43 +904,50 @@ module Pingpong
 
                   end # /while
 
+                  if @simulations.empty?
+                    # try something wild
+                    result = {}
+                    result["paddle_to_ball"] = -1
+                    result["offset"] = -1
+                    result["angle"] = 0
+                    result["power"] = -1 + rand(3)
+                    result["target-y"] = -1
+                    result["own-y"] = -1
+                    result["iterations"] = 0
+                    @simulations[0] = result
+                  end
+
                   if not @simulations.empty?
                     # we got some result we can use
                     # sort the results by score
                     sorted_results = @simulations.sort { |a,b| a<=>b }
-                    #Helpers::Log::debug "-------------------------------"
-                    #Helpers::Log::debug "Simulation normal y = #{@enemyPaddle.target_y}"
+                    #@log.debug "-------------------------------"
+                    #@log.debug "Simulation normal y = #{@enemyPaddle.target_y}"
                     #@simulations.each { |key, value| 
-                    #  Helpers::Log::debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}"
+                    #  @log.debug "(#{key}) => I:#{value["iterations"]} A:#{value["angle"]} P:#{value["power"]} Y:#{value["target-y"]} O:#{value["own-y"]}"
                     #}
                     # get the first result
                     best_result = sorted_results.first
+                    used_power = best_result[1]["power"]
 
-                    # if the enter angle is too low we will try to change the angle 
-                    #if Helpers::Math::is_close_to(@last_enter_angle,90,2)
-                    #  # get the ball moving
-                    #  Helpers::Log::debug "Note: Trying to get the ball moving at y-axis"
-                    #  if @last_enter_angle < 90
-                    #    used_power = @hit_offset_bottom_powerlimit
-                    #  else
-                    #    user_power = @hit_offset_top_powerlimit
-                    #  end
-                    #else
-                      # normal AI activated
-                      used_power = best_result[1]["power"]
-                    #end'
-
+                    # Special AI is implemented here
+                    if iterations > 3
+                      if last_deltaY < 0
+                        used_power = 1.0
+                      else
+                        used_power = -1.0
+                      end
+                    end
+                    #if (@ownPaddle.y - @enemyPaddle.y).abs > @config.arenaHeight / 2
+                    #end
 
                     @hit_offset = ((@hit_offset_max * @hit_offset_power) * @AI_level) * used_power
-
-                    # TODO: Remove this!
-                    @hit_offset = 0 #-@hit_offset_max
-
-                    if ( dirX < 0 )
+                    if ( dirX < 0 and distance_to_player > @config.arenaWidth/2 )
                       @last_target_y = best_result[1]["target-y"]
                       @last_target_result = best_result.dup
                       @last_target_results = @simulations.dup
                       @last_target_opponent_y = @enemyPaddle.y
+                      @last_target_own_y = best_result[1]["own-y"]
                     end
                   else
                     # we do not have any simulation results to use
@@ -1035,15 +955,15 @@ module Pingpong
                     @hit_offset = 0
                   end
 
-                  #Helpers::Log::debug "Hit offset >> #{@hit_offset} << #{cur_power} "
-                  #Helpers::Log::debug "Simulating from #{@start_power} to #{@max_power}, used power #{used_power}"
+                  #@log.debug "Hit offset >> #{@hit_offset} << #{cur_power} "
+                  #@log.debug "Simulating from #{@start_power} to #{@max_power}, used power #{used_power}"
 
-                  #Helpers::Log::debug "Best score: #{best_result}"
+                  #@log.debug "Best score: #{best_result}"
 
 
                   # TODO: Test how it behaves with offset 0
 
-                  #Helpers::Log::debug "Our > #{best_result[1]['y']} - #{best_result[1]["power"]}"
+                  #@log.debug "Our > #{best_result[1]['y']} - #{best_result[1]["power"]}"
 
                   # if we are at the start of the round we are just going to
                   # try to speed up the ball
@@ -1078,7 +998,7 @@ module Pingpong
                 # ok, it was too much work, we should just go to middle and wait
                 iterations += solve_results.iterations
                 @ownPaddle.set_target( @config.arenaHeight / 2 )
-                Helpers::Log::debug "Bounces #{iterations} over max!" 
+                @log.debug "Bounces #{iterations} over max!" 
                 #Distance to Player: #{distance_to_player}, Opp: #{distance_to_enemy}"
               end
 
@@ -1088,20 +1008,32 @@ module Pingpong
             #
             ###############################################
 
-            if @local_time - @updatedLastTimestamp > @updateRate && @ownPaddle.target_y != nil #&& @ownPaddle.avg_target_y != nil
+            if @last_avg_velocity.nil?
+              time_to_player = 0
+            else
+              time_to_player = (distance_to_player / @last_avg_velocity)
+            end
+            if time_to_player > 1000
+              @updateRate = 1000/10 # limit to 10 control msg per second
+            else
+              @updateRate = 1000/30 # fast as possible
+            end
 
+            if @local_time - @updatedLastTimestamp > @updateRate && @ownPaddle.target_y != nil #&& @ownPaddle.avg_target_y != nil
               @updatedLastTimestamp = @local_time
+
+              @current_target_y = @ownPaddle.target_y
 
               min_slowdown = 0
               is_at_border = false
               @wanted_y = @ownPaddle.target_y #.avg_target_y
-              if @wanted_y < @config.paddleHeight/2 + 1
-                @wanted_y = @config.paddleHeight/2 + 1
+              if @wanted_y < @config.paddleHeight/2
+                @wanted_y = @config.paddleHeight/2
                 min_slowdown = 5
                 is_at_border = true
               end
-              if @wanted_y > @config.arenaHeight - @config.paddleHeight/2 - 2
-                @wanted_y = @config.arenaHeight - @config.paddleHeight/2 - 2
+              if @wanted_y > @config.arenaHeight - @config.paddleHeight/2 - 1
+                @wanted_y = @config.arenaHeight - @config.paddleHeight/2 - 1
                 min_slowdown = 5
                 is_at_border = true
               end
@@ -1110,20 +1042,68 @@ module Pingpong
                 @intial_wanted_run = true
               end
 
-              speed = @max_paddle_speed
-              delta = @ownPaddle.y - @wanted_y
-              #Helpers::Log::debug "Wanted: #{@wanted_y} -> Got: #{@ownPaddle.y} -> Delta = #{delta} (#{@paddle_slowdown_power})"
+              #if distance_to_player > 250
 
-              paddle_slowdown = @paddle_slowdown_margin * @paddle_slowdown_power
-              if paddle_slowdown < min_slowdown
-                paddle_slowdown = min_slowdown
-              end
-              if delta.abs < paddle_slowdown
-                speed = delta.abs / paddle_slowdown
-              end
-              if speed > @max_paddle_speed
                 speed = @max_paddle_speed
+                delta = @ownPaddle.y - @wanted_y
+                #Helpers::Log::debug "Wanted: #{@wanted_y} -> Got: #{@ownPaddle.y} -> Delta = #{delta} (#{@paddle_slowdown_power})"
+
+                paddle_slowdown = @paddle_slowdown_margin * @paddle_slowdown_power
+                if paddle_slowdown < min_slowdown
+                  paddle_slowdown = min_slowdown
+                end
+                if delta.abs < paddle_slowdown
+                  speed = delta.abs / paddle_slowdown
+                end
+                if speed > @max_paddle_speed
+                  speed = @max_paddle_speed
+                end
+                speed = -speed if delta > 0
+
+              #else
+
+                # Coming back to paddle, use more accurate movements
+
+                # 1. Get the distance to the target location
+                #distance_to_target = (@wanted_y - @ownPaddle.y)
+                #Helpers::Log::debug "Distance to target location: #{distance_to_ball}"
+
+                # 2. Get the distance to the ball from the paddle edge
+                #Helpers::Log::debug "Ball Distance to paddle: #{distance_to_player}"
+
+                # 3. Calculate the time that the ball takes to get to the
+                #    paddle edge
+                #time_to_player = (distance_to_player / @last_avg_velocity)
+                #Helpers::Log::debug "Ball Time to paddle: #{time_to_player} ms"
+
+                # 4. We have that time to go to the target location
+                #    so calculate what should be the speed
+                #distance_to_target_at_slowspeed = 50
+              #  speed = distance_to_target / (time_to_player / 10)
+
+                # First we need to know about how many milliseconds we have time
+                # to get to the target location
+                # speed = (distance_to_player / @last_avg_velocity) / 10000.0
+              #end
+
+              if distance_to_player > @config.arenaWidth
+                speed = speed.round(2)
+              elsif distance_to_player > @config.arenaWidth / 2
+                speed = speed.round(3)
+              else
+                speed = speed.round(5)
               end
+
+              # Helpers::Log::debug "#{speed}" 
+
+              #s = distance_to_target
+              #t = time_to_player
+              #v1 = 1.0
+              #t1 = t * 0.8
+              #s1 = v1 * t1
+              #t2 = t - t1
+              #s2 = s - s2
+              #v2 = s2/t2
 
               # ball distance is more than our delta
               # so move the paddle at maximum speed
@@ -1141,63 +1121,16 @@ module Pingpong
               # Quickly move to the ball direction if the ball is
               # very close
               #if distance_to_player < 25 && @last_dirX < 0 && is_at_border == false
-              #  #Helpers::Log::debug "Trying to speedup at the end."
+              #  #@log.debug "Trying to speedup at the end."
               #  speed = 1.0
               #  delta = -last_deltaY * @AI_level
               #end
 
-              # 1. Get the distance to the target location
-              distance_to_target = (@wanted_y - @ownPaddle.y).abs
-              #Helpers::Log::debug "Distance to target location: #{distance_to_ball}"
-
-              # 2. Get the distance to the ball from the paddle edge
-              #Helpers::Log::debug "Ball Distance to paddle: #{distance_to_player}"
-
-              # 3. Calculate the time that the ball takes to get to the
-              #    paddle edge
-              time_to_player = (distance_to_player / @last_avg_velocity)
-              #Helpers::Log::debug "Ball Time to paddle: #{time_to_player} ms"
-
-              # 4. We have that time to go to the target location
-              #    so calculate what should be the speed
-              #distance_to_target_at_slowspeed = 50
-              speed = (distance_to_target).abs / (time_to_player / 10)
-
-              # First we need to know about how many milliseconds we have time
-              # to get to the target location
-              # speed = (distance_to_player / @last_avg_velocity) / 10000.0
-              speed = 0.2 if speed < 0.2
+              speed = -1.0 if speed < -1.0
               speed = 1.0 if speed > 1.0
-              # Helpers::Log::debug "#{speed}"
 
-              if delta < 0
-                Helpers::Log::write "> changeDir(#{speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
-                message = movement_message(speed)
-                if message != @last_sent_message
-                  #Helpers::Log::debug "-"
-                  tcp.puts message
-                  @last_sent_message = message
-                end
-
-              elsif delta > 0
-                Helpers::Log::write "> changeDir(#{-speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
-                message = movement_message(-speed)
-                if message != @last_sent_message
-                  #Helpers::Log::debug "+"
-                  tcp.puts message
-                  @last_sent_message = message
-                end
-
-              else
-                Helpers::Log::write "> changeDir(0) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
-                message = movement_message(0)
-                if message != @last_sent_message
-                  #Helpers::Log::debug "="
-                  tcp.puts message
-                  @last_sent_message = message
-                end
-
-              end
+              SendMessage tcp, movement_message(speed)
+              @log.write "> changeDir(#{speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
 
             end # /if
 
@@ -1208,36 +1141,74 @@ module Pingpong
             else
               @lose_count += 1
             end
-            Helpers::Log::write "< gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}"
-            Helpers::Log::debug "gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}" if $DEBUG
+            @log.write "< gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}"
+            @log.debug "gameIsOver: Winner is #{winner} | Win:#{@win_count} Lose:#{@lose_count} Total:#{@total_rounds}" if $DEBUG
             if winner == @player_name
-              Helpers::Log::write "Info: --WINNER--"
-              Helpers::Log::write "Info: Opponent enter angle was #{@last_enemy_enter_angle}"
-              Helpers::Log::write "Info: Opponent paddle was last at #{@enemyPaddle.y} [#{@enemyPaddle.y-@config.paddleHeight/2}..#{@enemyPaddle.y+@config.paddleHeight/2}]"
-              Helpers::Log::write "Info: Opponent paddle was going to #{@enemyPaddle.target_y} [#{@enemyPaddle.target_y-@config.paddleHeight/2}..#{@enemyPaddle.target_y+@config.paddleHeight/2}]"
-              Helpers::Log::write "Info: Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
+              @log.write "Info: --WINNER--"
+              @log.write "Info: Opponent enter angle was #{@last_enemy_enter_angle}"
+              @log.write "Info: Opponent paddle was last at #{@enemyPaddle.y} [#{@enemyPaddle.y-@config.paddleHeight/2}..#{@enemyPaddle.y+@config.paddleHeight/2}]"
+              @log.write "Info: Opponent paddle was going to #{@enemyPaddle.target_y} [#{@enemyPaddle.target_y-@config.paddleHeight/2}..#{@enemyPaddle.target_y+@config.paddleHeight/2}]"
+              @log.write "Info: Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
             else
-              Helpers::Log::write "Info: --LOSER--"
-              Helpers::Log::write "Info: Own enter angle was #{@last_enemy_enter_angle}"
-              Helpers::Log::write "Info: Own paddle was last at #{@ownPaddle.y} [#{@ownPaddle.y-@config.paddleHeight/2}..#{@ownPaddle.y+@config.paddleHeight/2}]"
-              Helpers::Log::write "Info: Own paddle was going to #{@ownPaddle.target_y} [#{@ownPaddle.target_y-@config.paddleHeight/2}..#{@ownPaddle.target_y+@config.paddleHeight/2}]"
-              Helpers::Log::write "Info: Own paddle hit offset was at #{@hit_offset} with power of #{@hit_offset_power}"
-              Helpers::Log::write "Info: Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
+              @log.write "Info: --LOSER--"
+              @log.write "Info: Own enter angle was #{@last_enemy_enter_angle}"
+              @log.write "Info: Own paddle was last at #{@ownPaddle.y} [#{@ownPaddle.y-@config.paddleHeight/2}..#{@ownPaddle.y+@config.paddleHeight/2}]"
+              @log.write "Info: Own paddle was going to #{@ownPaddle.target_y} [#{@ownPaddle.target_y-@config.paddleHeight/2}..#{@ownPaddle.target_y+@config.paddleHeight/2}]"
+              @log.write "Info: Own paddle hit offset was at #{@hit_offset} with power of #{@hit_offset_power}"
+              @log.write "Info: Ball last seen at #{@ball.x}, #{@ball.y} (velocity: #{@last_velocity})"
             end
             if @scores.has_key?(winner)
               @scores[winner]+=1 # increment score for specified playername
             else
               @scores[winner]=1
             end
-            @scores.each {|key, value| Helpers::Log::write "Info: Score: #{key}: #{value}" }
+            @scores.each {|key, value| @log.write "Info: Score: #{key}: #{value}" }
             reset_round
             $stdout.flush
           else
             # unknown message received
-            Helpers::Log::write "< unknown_message: #{json}"
+            @log.write "< unknown_message: #{json}"
         end
       end
-      @running = false
+    end
+
+    def SendMessage tcp, msg
+      if msg != @last_sent_message
+        timestamp = get_localtimestamp
+        # remove old messages from queue
+        if not @message_queue.nil?
+          @message_queue.delete_if { |x| x[0]<(timestamp-@MAX_QUEUE_TOTAL_TIME*1000) }
+        end
+        if @message_queue.count == 0
+          # no messages in queue, add and send msg
+          tcp.puts msg
+          @last_sent_message = msg
+          # add to queue
+          @message_queue.push [timestamp,msg]
+        elsif @message_queue.count < @MAX_MESSAGES_IN_QUEUE
+          # get oldest message
+          oldest = @message_queue.first
+          newest = @message_queue.last
+          if newest[1] != msg
+            diff = (newest[0]-oldest[0]) - (timestamp-newest[0])
+            if diff > @MAX_QUEUE_TOTAL_TIME * 1000
+              @log.debug "SendMessage failed, total queue time would be #{diff} ms"
+            else
+              # add message to queue and send
+              tcp.puts msg
+              @last_sent_message = msg
+              # add to queue
+              @message_queue.push [timestamp,msg]
+              # limit queue
+              if @message_queue.count > @MAX_MESSAGES_IN_QUEUE
+                @message_queue.delete_at(0)
+              end
+            end
+          end
+        else
+          @log.debug "SendMessage failed, total queue size would exceed the maximum"
+        end
+      end
     end
 
     def join_message(player_name)
@@ -1257,17 +1228,17 @@ module Pingpong
     end
 
     def show_banner
-      Helpers::Log::write ""
-      Helpers::Log::write "    _______ __                      __       "
-      Helpers::Log::write "   |    ___|__|.-----.----.-----.--|  |.----."
-      Helpers::Log::write "   |    ___|  ||     |  __|  _  |  _  ||   _|"
-      Helpers::Log::write "   |___|   |__||__|__|____|_____|_____||__|  "
-      Helpers::Log::write ""
-      Helpers::Log::write "   H e l l o W o r l d O p e n   B o t  v1.1"
-      Helpers::Log::write ""
-      Helpers::Log::write "      Coded by Fincodr aka Mika Luoma-aho"
-      Helpers::Log::write "      Send job offers to <fincodr@mxl.fi>"
-      Helpers::Log::write ""
+      @log.write ""
+      @log.write "    _______ __                      __       "
+      @log.write "   |    ___|__|.-----.----.-----.--|  |.----."
+      @log.write "   |    ___|  ||     |  __|  _  |  _  ||   _|"
+      @log.write "   |___|   |__||__|__|____|_____|_____||__|  "
+      @log.write ""
+      @log.write "   H e l l o W o r l d O p e n   B o t  v1.0"
+      @log.write ""
+      @log.write "      Coded by Fincodr aka Mika Luoma-aho"
+      @log.write "      Send job offers to <fincodr@mxl.fi>"
+      @log.write ""
       $stdout.flush
     end
 

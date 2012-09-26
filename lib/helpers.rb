@@ -29,7 +29,7 @@
 #
 module Helpers
 
-  module Log
+  class Log
 
     ###############################################
     #
@@ -40,25 +40,28 @@ module Helpers
     #
     # returns:
     # - nothing
-    def Log.write(msg)
+    def write(msg)
       timestamp = DateTime.now.strftime "[%Y%m%d-%H%M%S.%L]"
       puts "#{timestamp} #{msg}"
     end
 
-    def Log.debug(msg)
+    def debug(msg)
       timestamp = DateTime.now.strftime "[%Y%m%d-%H%M%S.%L]"
       $stderr.puts "#{timestamp} #{msg}"
     end
 
-    def Log.write1(msg)
-      $stdout.write "#{msg}"
-    end
+  end
 
-    def Log.debug1(msg)
-      $stderr.write "#{msg}"
+  class SolveResult
+    def initialize x, y, dx, dy, distance, iterations
+      @distance = distance
+      @iterations = iterations
+      @point = Vector2.new x, y, dx, dy
     end
-
-  end # /Log  
+    attr_accessor :distance
+    attr_accessor :iterations
+    attr_accessor :point
+  end
 
   class Configuration
     def initialize
@@ -86,181 +89,167 @@ module Helpers
     attr_reader :ballRadius
   end # /Configuration
 
-  module Object
-    ###############################################
-    #
-    # Class: Ball
-    #
-    # everything about the Ball
-    #
-    # methods:
-    # - simulate
-    # - is_on_the_same_line
-    #
-    class Ball
-      def initialize
-        reset
-      end
-      def reset
-        @x = nil
-        @y = nil
-        @x2 = nil
-        @y2 = nil
+  class Vector2
+    def initialize x, y, dx, dy
+      @x = x
+      @y = y
+      @dx = dx
+      @dy = dy
+    end
+    def set_position x, y
+      @x = x
+      @y = y
+    end
+    def set_velocity dx, dy
+      @dx = dx
+      @dy = dy
+    end
+    def scale sz
+      @dx *= sz
+      @dy *= sz
+    end
+    def normalize
+      power = Math.hypot( dx, dy )
+      @dx /= power
+      @dy /= power
+    end 
+    def rotate degrees
+      ca = ::Math.cos(-degrees*(::Math::PI/180))
+      sa = ::Math.sin(-degrees*(::Math::PI/180))
+      rx = @dx*ca-@dy*sa
+      ry = @dx*sa+@dy*ca
+      @dx = rx
+      @dy = ry
+    end
+    attr_accessor :x
+    attr_accessor :y
+    attr_accessor :dx
+    attr_accessor :dy
+  end # /Vector2
+
+  class Point
+    def initialize x, y
+      @x = x
+      @y = y
+    end
+    def set_position x, y
+      @x = x
+      @y = y
+    end
+    def reset
+      @x = nil
+      @y = nil
+    end
+    attr_reader :x
+    attr_reader :y
+  end # /Point
+
+  ###############################################
+  #
+  # Class: Ball
+  #
+  # everything about the Ball
+  #
+  # methods:
+  # - simulate
+  # - is_on_the_same_line
+  #
+  class Ball
+    def initialize
+      reset
+    end
+    def reset
+      @x = nil
+      @y = nil
+      @x2 = nil
+      @y2 = nil
+      @x3 = nil
+      @y3 = nil
+    end
+    def set_position(x, y)
+      if @x2.nil?
         @x3 = nil
         @y3 = nil
+      else
+        @x3 = @x2
+        @y3 = @y2
       end
-      def set_position(x, y)
-        if @x2.nil?
-          @x3 = nil
-          @y3 = nil
-        else
-          @x3 = @x2
-          @y3 = @y2
-        end
-        if @x.nil?
-          @x2 = nil
-          @y2 = nil
-        else
-          @x2 = @x
-          @y2 = @y
-        end
-        @x = x
-        @y = y
-      end
-      attr_accessor :x
-      attr_accessor :y
-      attr_accessor :x2
-      attr_accessor :y2
-      attr_accessor :x3
-      attr_accessor :y3
-    end # /Ball
-
-    class Paddle
-      def initialize
-        reset
-      end
-      def set_position( x, y )
-        if @y2.nil?
-          @y3 = nil
-        else
-          @y3 = @y2
-        end
-        if @y.nil?
-          @y2 = nil
-          @dy = nil
-        else
-          @y2 = @y
-          @dy = @y-y
-        end
-        if not @y.nil? and not @dy.nil?
-          @avg_dy = (@dy+(@y-y)) / 2
-        else
-          @avg_dy = nil
-        end
-        @x = x
-        @y = y
-      end
-      def reset
-        @x = nil
-        @y = nil
+      if @x.nil?
+        @x2 = nil
         @y2 = nil
-        @y3 = nil
-        @dy = nil
-        @target_y = nil
-        @avg_target_y = nil
-      end    
-      def set_target( y )
-        # also calculate average from two sets
-        if @target_y != nil
-          @avg_target_y = (@target_y + y) / 2
-        else
-          # no previous result available so set average to nil
-          @avg_target_y = nil
-        end
-        @target_y = y
+      else
+        @x2 = @x
+        @y2 = @y
       end
-      attr_reader :x
-      attr_reader :y
-      attr_reader :y2
-      attr_reader :y3
-      attr_reader :target_y
-      attr_reader :avg_target_y
-      attr_reader :dy
-      attr_reader :avg_dy
-    end # /class
-
-  end # /Object
-
-  module Math
-
-    class SolveResult
-      def initialize x, y, dx, dy, distance, iterations
-        @distance = distance
-        @iterations = iterations
-        @point = Vector2.new x, y, dx, dy
-      end
-      attr_accessor :distance
-      attr_accessor :iterations
-      attr_accessor :point
+      @x = x
+      @y = y
     end
+    attr_accessor :x
+    attr_accessor :y
+    attr_accessor :x2
+    attr_accessor :y2
+    attr_accessor :x3
+    attr_accessor :y3
+  end # /Ball
 
-    class Vector2
-      def initialize x, y, dx, dy
-        @x = x
-        @y = y
-        @dx = dx
-        @dy = dy
+  class Paddle
+    def initialize
+      reset
+    end
+    def set_position( x, y )
+      if @y2.nil?
+        @y3 = nil
+      else
+        @y3 = @y2
       end
-      def set_position x, y
-        @x = x
-        @y = y
+      if @y.nil?
+        @y2 = nil
+        @dy = nil
+      else
+        @y2 = @y
+        @dy = @y-y
       end
-      def set_velocity dx, dy
-        @dx = dx
-        @dy = dy
+      if not @y.nil? and not @dy.nil?
+        @avg_dy = (@dy+(@y-y)) / 2
+      else
+        @avg_dy = nil
       end
-      def scale sz
-        @dx *= sz
-        @dy *= sz
+      @x = x
+      @y = y
+    end
+    def reset
+      @x = nil
+      @y = nil
+      @y2 = nil
+      @y3 = nil
+      @dy = nil
+      @target_y = nil
+      @avg_target_y = nil
+    end    
+    def set_target( y )
+      # also calculate average from two sets
+      if @target_y != nil
+        @avg_target_y = (@target_y + y) / 2
+      else
+        # no previous result available so set average to nil
+        @avg_target_y = nil
       end
-      def normalize
-        power = Math.hypot( dx, dy )
-        @dx /= power
-        @dy /= power
-      end 
-      def rotate degrees
-        ca = ::Math.cos(-degrees*(::Math::PI/180))
-        sa = ::Math.sin(-degrees*(::Math::PI/180))
-        rx = @dx*ca-@dy*sa
-        ry = @dx*sa+@dy*ca
-        @dx = rx
-        @dy = ry
-      end
-      attr_accessor :x
-      attr_accessor :y
-      attr_accessor :dx
-      attr_accessor :dy
-    end # /Vector2
+      @target_y = y
+    end
+    attr_reader :x
+    attr_reader :y
+    attr_reader :y2
+    attr_reader :y3
+    attr_reader :target_y
+    attr_reader :avg_target_y
+    attr_reader :dy
+    attr_reader :avg_dy
+  end # /class
 
-    class Point
-      def initialize x, y
-        @x = x
-        @y = y
-      end
-      def set_position x, y
-        @x = x
-        @y = y
-      end
-      def reset
-        @x = nil
-        @y = nil
-      end
-      attr_reader :x
-      attr_reader :y
-    end # /Point
+  class Math
 
     # Returns top secret formula results
-    def Math.top_secret_formula offset
+    def top_secret_formula offset
       a = Float(offset)
       return 0 if is_close_to a, 0
       #return (0.57125*y) = pretty darn good :)
@@ -276,7 +265,7 @@ module Helpers
 
     # Solves collisions from p1 point (Vector2) and returns
     # a new point of the resulting vector
-    def Math.solve_collisions x1, y1, x2, y2, config, max_iterations
+    def solve_collisions x1, y1, x2, y2, config, max_iterations
       # loop while we are simulating
       x = 0
       y = 0
@@ -350,7 +339,7 @@ module Helpers
     # The value is calculated using the
     # second parameter that is usually the
     # paddle width (10 pixels for example)
-    def Math.angle_to_hit_offset_cut a, b
+    def angle_to_hit_offset_cut a, b
       if a < 90
         return -(::Math.cos((::Math::PI/180)*a))*b-3
       else
@@ -358,12 +347,12 @@ module Helpers
       end
     end # /angle_to_hit_offset_cut
 
-    def Math.is_close_to( a, b, diff = 0.001 )
+    def is_close_to( a, b, diff = 0.001 )
       return true if ( (a-b).abs < diff )
       return false
     end
 
-    def Math.calculate_collision(y1, x2, y2, x3, y3)
+    def calculate_collision(y1, x2, y2, x3, y3)
       return (x3 - ((x2 - x3) / (y2 - y3)) * (y3 - y1))
     end
 
@@ -373,7 +362,7 @@ module Helpers
     #       that as the source point for calculating
     #       the exit angle.
 
-    def Math.is_p3_on_the_same_p1p2_line(x1, y1, x2, y2, x3, y3)
+    def is_p3_on_the_same_p1p2_line(x1, y1, x2, y2, x3, y3)
       return false if is_close_to(x2, x1)
       return false if is_close_to(y2, y1)
       a = Float(x2-x1)
@@ -381,7 +370,7 @@ module Helpers
       return ((x3-x1)-(a/b)*(y3-y1)).abs<2
     end # /is_p3_on_the_same_p1p2_line
 
-    def Math.is_p1_on_the_same_p2p3_line(x1, y1, x2, y2, x3, y3)
+    def is_p1_on_the_same_p2p3_line(x1, y1, x2, y2, x3, y3)
       return false if is_close_to(x2, x3)
       return false if is_close_to(y2, y3)
       a = Float(x2-x3)
@@ -389,7 +378,7 @@ module Helpers
       return ((x1-x3)-(a/b)*(y1-y3)).abs<2
     end # /is_p1_on_the_same_p2p3_line
 
-    def Math.on_the_same_line(x1, y1, x2, y2, x3, y3)
+    def on_the_same_line(x1, y1, x2, y2, x3, y3)
       return true if is_close_to(y1, y2) && is_close_to(y1, y3)
       return true if is_close_to(x1, x2) && is_close_to(x1, x3)
       return false if is_close_to(x2, x3)
@@ -399,11 +388,11 @@ module Helpers
       return ((x3-x1)-(a/b)*(y3-y1)).abs<2
     end # /on_the_same_line
 
-    def Math.radians_to_degree( radians )
+    def radians_to_degree( radians )
       return radians * 180 / ::Math::PI
     end # /radians_to_degree
 
-    def Math.calculate_line_angle( x1, y1, x2, y2 )
+    def calculate_line_angle( x1, y1, x2, y2 )
       angle = radians_to_degree( ::Math.atan((x2-x1)/(y2-y1)) )
       if x2 > x1
         if y2 < y1
@@ -419,8 +408,8 @@ module Helpers
         end
       end
       return angle
-    end # /calculate_line_angle    
+    end # /calculate_line_angle
 
-  end # /Math
+  end
 
-end # /Helpers
+end #/ module
