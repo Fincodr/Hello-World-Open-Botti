@@ -1,5 +1,12 @@
 HISTORY:
 
+Version 1.1 Semifinals:
+
+* Huolehdi että testaat tilanteet jossa pallo liikkuu tasan
+  x-akselin suuntaisesti kohti mailaa.. tee tästä testicase!
+
+
+
 Version 0.8:
 
 * Jos pallo osumassa reunaan, niin mailan pitää hidastaa rauhallisesti eikä

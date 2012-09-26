@@ -619,7 +619,7 @@ module Pingpong
                     if @math.is_close_to @ownPaddle.y, @ownPaddle.y2, 0.1
                       if (@last_enter_point-@ownPaddle.y2).abs < @config.paddleHeight/2
                         @log.debug "TEST RESULTS: #{(@last_enter_point-@ownPaddle.y2).abs}, #{@last_avg_velocity}, #{(@last_deviation).abs}" if $DEBUG and @test_mode == 1
-                        @log.write "TEST_RESULTS: #{@last_enter_point-@ownPaddle.y2}, #{@last_avg_velocity}, #{@last_deviation}"
+                        @log.write "TEST_RESULTS: #{@last_enter_point-@ownPaddle.y2}, #{@last_avg_velocity}, #{@last_deviation}" if @test_mode == 1
                         #@log.debug "=======================================================" if $DEBUG
                         #@log.debug "== Avg velocity   : #{@last_avg_velocity}" if $DEBUG
                         #@log.debug "== Paddle Y       : #{@ownPaddle.y2}" if $DEBUG
@@ -719,7 +719,7 @@ module Pingpong
 
                 # scale hit_offset depending on the estimated enter angle
                 # safe angles are -25 .. +25 and anything over that should decrement the power
-                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, 6
+                offset_cut_value = @math.angle_to_hit_offset_cut @last_enter_angle, 5
 
                 # set the offset top and bottom max values
                 @hit_offset_top = -@hit_offset_max
@@ -856,17 +856,17 @@ module Pingpong
                       # to move closer
                       at_edge = false
 
-                      if (@last_enter_angle-90).abs < 30 
-                        if @ownPaddle.y < @config.arenaHeight/4.5
+                      #if (@last_enter_angle-90).abs < 30 
+                        if @ownPaddle.y < @config.arenaHeight/4.2
                           #@log.debug "Corner situation up!"
                           @opponent_best_target = @config.ballRadius
                           at_edge = true
-                        elsif @ownPaddle.y > @config.arenaHeight - @config.arenaHeight/4.5
+                        elsif @ownPaddle.y > @config.arenaHeight - @config.arenaHeight/4.2
                           @opponent_best_target = @config.arenaHeight-1 - @config.ballRadius
                           #@log.debug "Corner situation down!"
                           at_edge = true
                         end
-                      end
+                      #end
 
                       #if paddle_time_to_ball < ball_time_to_paddle
                         # we can make it, keep the result
@@ -931,11 +931,11 @@ module Pingpong
                     used_power = best_result[1]["power"]
 
                     # Special AI is implemented here
-                    if iterations > 3
+                    if iterations > 4
                       if last_deltaY < 0
-                        used_power = 1.0
+                        used_power = hit_offset_bottom_powerlimit
                       else
-                        used_power = -1.0
+                        used_power = hit_offset_top_powerlimit
                       end
                     end
                     #if (@ownPaddle.y - @enemyPaddle.y).abs > @config.arenaHeight / 2
@@ -1013,7 +1013,7 @@ module Pingpong
             else
               time_to_player = (distance_to_player / @last_avg_velocity)
             end
-            if time_to_player > 1000
+            if time_to_player > 650
               @updateRate = 1000/10 # limit to 10 control msg per second
             else
               @updateRate = 1000/30 # fast as possible
