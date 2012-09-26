@@ -933,9 +933,9 @@ module Pingpong
                     # Special AI is implemented here
                     if iterations > 4
                       if last_deltaY < 0
-                        used_power = hit_offset_bottom_powerlimit
+                        used_power = @hit_offset_bottom_powerlimit
                       else
-                        used_power = hit_offset_top_powerlimit
+                        used_power = @hit_offset_top_powerlimit
                       end
                     end
                     #if (@ownPaddle.y - @enemyPaddle.y).abs > @config.arenaHeight / 2
