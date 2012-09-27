@@ -110,13 +110,12 @@ module Pingpong
       # last updated timestamps
       @updatedLastTimestamp = 0
       @updatedDeltaTime = 0
-      @updateRate = 1000/9.9 # limit send rate to ~9.9 msg/s
 
       # AI settings
       @AI_level = 1.0 # 1.0 = hardest, 0.0 normal and -1.0 easiest (helps the opponent side)
       @block_count = 0 # how many times we have blocked thus far
       @last_bounce_state = 0 # 0 = no collision, collision 1st, collision 2nd
-      @paddle_safe_margin = 0
+      @paddle_safe_margin = 1
       @paddle_slowdown_margin = 20
       @paddle_slowdown_power = 1.0
       @target_offset = 0 # check if paddle up/down sides are correct and adjust!
@@ -159,7 +158,7 @@ module Pingpong
       @total_rounds += 1
 
       # temp
-      @wanted_y = 240+25
+      @wanted_y = 240
       @old_wanted_y = @wanted_y
       @passed_wanted_y = false
       @show_json = true
@@ -838,7 +837,7 @@ module Pingpong
                   # + 100%
                   #
                   @start_power = @hit_offset_top_powerlimit
-                  @power_add = 0.025
+                  @power_add = 0.020
                   @max_power = @hit_offset_bottom_powerlimit
                   @simulations = {}
 
@@ -1003,9 +1002,9 @@ module Pingpong
               time_to_player = (distance_to_player / @last_avg_velocity)
             end
             if time_to_player > 500
-              @updateRate = 1000/10 # limit to 10 control msg per second
+              @updateRate = 1000/9.9 # limit to 9.9 control msg per second - stil limiting to 18 messages per 2 second.
             else
-              @updateRate = 1000/30 # fast as possible
+              @updateRate = 1000/30 # fast as possible - still limiting to 18 messages per 2 second.
             end
 
             if @local_time - @updatedLastTimestamp > @updateRate && @ownPaddle.target_y != nil #&& @ownPaddle.avg_target_y != nil
@@ -1015,20 +1014,45 @@ module Pingpong
 
               min_slowdown = 0
               is_at_border = false
+
               @wanted_y = @ownPaddle.target_y #.avg_target_y
-              if @wanted_y < @config.paddleHeight/2
-                @wanted_y = @config.paddleHeight/2
-                min_slowdown = 5
-                is_at_border = true
-              end
-              if @wanted_y > @config.arenaHeight - @config.paddleHeight/2 - 1
-                @wanted_y = @config.arenaHeight - @config.paddleHeight/2 - 1
-                min_slowdown = 5
-                is_at_border = true
+              if (@last_enter_angle-90).abs < 15 and iterations > 1
+                if @wanted_y < @config.paddleHeight/2 + @config.ballRadius
+                  #Helpers::Log::debug "Trying special trick :)"
+                  @wanted_y = @config.paddleHeight/2 + @config.ballRadius
+                  min_slowdown = 5
+                  is_at_border = true
+                end
+                if @wanted_y > @config.arenaHeight - @config.paddleHeight/2 - 1 - @config.ballRadius
+                  #Helpers::Log::debug "Trying special trick :)"
+                  @wanted_y = @config.arenaHeight - @config.paddleHeight/2 - 1 - @config.ballRadius
+                  min_slowdown = 5
+                  is_at_border = true
+                end
+              else
+                if @wanted_y < @config.paddleHeight/2
+                  @wanted_y = @config.paddleHeight/2
+                  min_slowdown = 5
+                  is_at_border = true
+                end
+                if @wanted_y > @config.arenaHeight - @config.paddleHeight/2 - 1
+                  @wanted_y = @config.arenaHeight - @config.paddleHeight/2 - 1
+                  min_slowdown = 5
+                  is_at_border = true
+                end
               end
 
               if @wanted_y != @old_wanted_y
                 @intial_wanted_run = true
+              end
+
+              distance_to_target = (@wanted_y - @ownPaddle.y).abs
+              time_to_player = (distance_to_player / @last_avg_velocity)
+              time_to_target = (distance_to_target)
+              #Helpers::Log::debug1 "\r#{time_to_player} vs #{time_to_target}\r"
+              if time_to_target > time_to_player and time_to_player > 5 and time_to_target > 5
+                #Helpers::Log::debug "Not going to make it! Ball vs Paddle: #{time_to_player} vs #{time_to_target}"
+                min_slowdown = 1.0
               end
 
               #if distance_to_player > 250
@@ -1053,22 +1077,10 @@ module Pingpong
 
                 # Coming back to paddle, use more accurate movements
 
-                # 1. Get the distance to the target location
-                #distance_to_target = (@wanted_y - @ownPaddle.y)
-                #Helpers::Log::debug "Distance to target location: #{distance_to_ball}"
-
-                # 2. Get the distance to the ball from the paddle edge
-                #Helpers::Log::debug "Ball Distance to paddle: #{distance_to_player}"
-
-                # 3. Calculate the time that the ball takes to get to the
-                #    paddle edge
-                #time_to_player = (distance_to_player / @last_avg_velocity)
-                #Helpers::Log::debug "Ball Time to paddle: #{time_to_player} ms"
 
                 # 4. We have that time to go to the target location
                 #    so calculate what should be the speed
-                #distance_to_target_at_slowspeed = 50
-              #  speed = distance_to_target / (time_to_player / 10)
+                #speed = distance_to_target / (time_to_player / 10)
 
                 # First we need to know about how many milliseconds we have time
                 # to get to the target location
@@ -1119,7 +1131,8 @@ module Pingpong
               speed = 1.0 if speed > 1.0
 
               SendMessage tcp, movement_message(speed)
-              Helpers::Log::write "> changeDir(#{speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
+              #Helpers::Log::write "> changeDir(#{speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
+              #Helpers::Log::debug "> changeDir(#{speed}) -> target: #{@ownPaddle.target_y}, current: #{@ownPaddle.y}" if $DEBUG
 
             end # /if
 
@@ -1172,6 +1185,7 @@ module Pingpong
           # no messages in queue, add and send msg
           tcp.puts msg
           @last_sent_message = msg
+          Helpers::Log::write "> #{msg}"
           # add to queue
           @message_queue.push [timestamp,msg]
         elsif @message_queue.count < @MAX_MESSAGES_IN_QUEUE
@@ -1186,6 +1200,7 @@ module Pingpong
               # add message to queue and send
               tcp.puts msg
               @last_sent_message = msg
+              Helpers::Log::write "> #{msg}"
               # add to queue
               @message_queue.push [timestamp,msg]
               # limit queue
