@@ -168,13 +168,27 @@ module Pingpong
     def duel(player_name, other_name, tcp)
       Helpers::Log::write "> duel(#{player_name} vs #{other_name})"
       tcp.puts duel_message(player_name, other_name)
-      react_to_messages_from_server tcp
+      begin  
+        react_to_messages_from_server tcp
+      rescue Exception => msg  
+        # display the system generated error message  
+        puts msg  
+        # try to start again
+        react_to_messages_from_server tcp
+      end  
     end
 
     def play(player_name, tcp)
       Helpers::Log::write "> join(#{player_name})"
       tcp.puts join_message(player_name)
-      react_to_messages_from_server tcp
+      begin  
+        react_to_messages_from_server tcp
+      rescue Exception => msg  
+        # display the system generated error message  
+        puts msg  
+        # try to start again
+        react_to_messages_from_server tcp
+      end  
     end
 
     def react_to_messages_from_server(tcp)
