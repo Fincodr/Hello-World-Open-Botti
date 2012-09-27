@@ -72,7 +72,7 @@ module Pingpong
       @total_rounds = 0
       @win_count = 0
       @lose_count = 0
-      @MAX_MESSAGES_IN_QUEUE = 20 # 20 messages per 2 second
+      @MAX_MESSAGES_IN_QUEUE = 19 # 19 messages per 2 second
       @MAX_QUEUE_TOTAL_TIME = 2.0 # 2 seconds
 
       # testmode settings
@@ -186,6 +186,7 @@ module Pingpong
     end
 
     def react_to_messages_from_server(tcp)
+      @log.write "started message loop"
       while json = tcp.gets
         message = JSON.parse(json)
         begin
@@ -1165,11 +1166,13 @@ module Pingpong
             @scores.each {|key, value| @log.write "Info: Score: #{key}: #{value}" }
             reset_round
             $stdout.flush
+
           else
             # unknown message received
             @log.write "< unknown_message: #{json}"
         end
       end
+      @log.write "ended message loop"
     end
 
     def SendMessage tcp, msg
