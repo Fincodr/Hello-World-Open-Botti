@@ -150,6 +150,8 @@ module Pingpong
       @last_target_opponent_y = 0
       @last_target_own_y = 0
       @current_target_y = -1
+      @hit_offset_top_powerlimit = -1.0
+      @hit_offset_bottom_powerlimit = 1.0
 
       # default configuration
       # will be updated from the gameIsOn server message
@@ -839,6 +841,7 @@ module Pingpong
                     # try to solve
                     solve_results = @math.solve_collisions test_vector.x, test_vector.y, test_vector.x+test_vector.dx, test_vector.y-test_vector.dy, @config, @max_iterations
                     p2 = solve_results.point
+                    distance = solve_results.distance
                     distance_back = solve_results.distance
                     if p2.x >= @config.arenaWidth - @config.paddleWidth - @config.ballRadius - 1
                       # we got result
@@ -848,8 +851,14 @@ module Pingpong
                       p3 = solve_results2.point
                       distance_back += solve_results2.distance
 
+                      # Opponent statistics
+                      opponent_distance_to_ball = (p2.y - @enemyPaddle.y).abs
+                      opponent_paddle_time_to_ball = opponent_distance_to_ball / 10 # paddle moves at maximum of 10 pixels per 10th of a second
+                      ball_time_to_opponent = (distance / @last_avg_velocity) / 100.0
+
+                      # Own statitics
                       distance_to_paddle = (p3.y - @ownPaddle.y).abs
-                      paddle_time_to_ball = distance_to_paddle # own paddle moves at maximum of 10 pixels per 10th of a second
+                      paddle_time_to_ball = distance_to_paddle / 10 # own paddle moves at maximum of 10 pixels per 10th of a second
                       ball_time_to_paddle = (distance_back / @last_avg_velocity) / 100.0
 
                       # If we are near the edges and the incoming angle is less than 45
@@ -882,7 +891,27 @@ module Pingpong
                           #  result_score = nil
                           #end
                         else
-                          result_score = (p2.y - @opponent_best_target).abs.to_i
+
+                          if opponent_paddle_time_to_ball - 8 > ball_time_to_opponent
+                            # If the opponent has problems blocking from the current
+                            # location we should aim there
+                            result_score = -(opponent_paddle_time_to_ball-ball_time_to_opponent)
+                            @log.debug "Opponent paddle time to ball: #{opponent_paddle_time_to_ball}, Ball time to opponent: #{ball_time_to_opponent}"
+                          else
+                            # We should target the area that is closest to us and
+                            # as close to the center as possible
+                            maximum_distance = (ball_time_to_paddle * 10) / 2
+                            if @ownPaddle.y < @config.arenaHeight / 2
+                              # we should try to move towards center (down)
+                              optimal_return_location = @ownPaddle.y + maximum_distance
+                              optimal_return_location = @config.arenaHeight / 2 if optimal_return_location > @config.arenaHeight / 2
+                            else
+                              # we should try to move towards center (up)
+                              optimal_return_location = @ownPaddle.y - maximum_distance
+                              optimal_return_location = @config.arenaHeight / 2 if optimal_return_location < @config.arenaHeight / 2
+                            end
+                            result_score = (p3.y - optimal_return_location).abs.to_i #(p2.y - @opponent_best_target).abs.to_i
+                          end
                         end
                         if not result_score.nil?
                           result = {}
@@ -932,13 +961,13 @@ module Pingpong
                     used_power = best_result[1]["power"]
 
                     # Special AI is implemented here
-                    if iterations > 4
-                      if last_deltaY < 0
-                        used_power = @hit_offset_bottom_powerlimit
-                      else
-                        used_power = @hit_offset_top_powerlimit
-                      end
-                    end
+                    #if iterations > 4
+                    #  if last_deltaY < 0
+                    #    used_power = @hit_offset_bottom_powerlimit
+                    #  else
+                    #    used_power = @hit_offset_top_powerlimit
+                    #  end
+                    #end
                     #if (@ownPaddle.y - @enemyPaddle.y).abs > @config.arenaHeight / 2
                     #end
 
