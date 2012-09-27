@@ -1166,7 +1166,6 @@ module Pingpong
             @scores.each {|key, value| @log.write "Info: Score: #{key}: #{value}" }
             reset_round
             $stdout.flush
-
           else
             # unknown message received
             @log.write "< unknown_message: #{json}"
