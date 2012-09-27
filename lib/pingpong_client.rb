@@ -896,7 +896,7 @@ module Pingpong
                             # If the opponent has problems blocking from the current
                             # location we should aim there
                             result_score = -(opponent_paddle_time_to_ball-ball_time_to_opponent)
-                            @log.debug "Opponent paddle time to ball: #{opponent_paddle_time_to_ball}, Ball time to opponent: #{ball_time_to_opponent}"
+                            #@log.debug "Opponent paddle time to ball: #{opponent_paddle_time_to_ball}, Ball time to opponent: #{ball_time_to_opponent}"
                           else
                             # We should target the area that is closest to us and
                             # as close to the center as possible
