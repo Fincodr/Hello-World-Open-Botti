@@ -1230,15 +1230,7 @@ module Pingpong
 
     def show_banner
       Helpers::Log::write ""
-      Helpers::Log::write "    _______ __                      __       "
-      Helpers::Log::write "   |    ___|__|.-----.----.-----.--|  |.----."
-      Helpers::Log::write "   |    ___|  ||     |  __|  _  |  _  ||   _|"
-      Helpers::Log::write "   |___|   |__||__|__|____|_____|_____||__|  "
-      Helpers::Log::write ""
       Helpers::Log::write "   H e l l o W o r l d O p e n   B o t  v1.4"
-      Helpers::Log::write ""
-      Helpers::Log::write "      Coded by Fincodr aka Mika Luoma-aho"
-      Helpers::Log::write "      Send job offers to <fincodr@mxl.fi>"
       Helpers::Log::write ""
       Helpers::Log::debug "HelloWorldOpen Bot v1.4 ready."
       $stdout.flush
